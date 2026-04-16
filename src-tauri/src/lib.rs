@@ -1,5 +1,6 @@
 mod audio;
 mod db;
+mod llm;
 
 use audio::capture::SpeechBuffer;
 use audio::transcribe::{self, TranscriptSegment, Transcriber};
@@ -7,6 +8,7 @@ use audio::vad::Vad;
 use audio::AudioState;
 use cpal::Stream;
 use db::Database;
+use llm::client::LlmClient;
 use std::sync::{Arc, Mutex};
 
 /// Wrapper to make cpal::Stream usable in Tauri state (Send + Sync)
@@ -170,6 +172,44 @@ fn has_whisper_model() -> bool {
     transcribe::default_model_path().exists()
 }
 
+/// Check if Ollama is reachable
+#[tauri::command]
+async fn check_llm_status(
+    llm: tauri::State<'_, Arc<LlmClient>>,
+) -> Result<bool, String> {
+    llm.health_check().await
+}
+
+/// Process a conversation through the LLM pipeline (extract structure, tasks, memories)
+#[tauri::command]
+async fn process_conversation_cmd(
+    conversation_id: String,
+    llm: tauri::State<'_, Arc<LlmClient>>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<String, String> {
+    // Gather transcript text from segments
+    let transcript = {
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare("SELECT text FROM transcript_segments WHERE conversation_id = ?1 ORDER BY start_time")
+            .map_err(|e| e.to_string())?;
+        let texts: Vec<String> = stmt
+            .query_map([&conversation_id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        texts.join(" ")
+    };
+
+    if transcript.trim().is_empty() {
+        return Err("No transcript segments found for this conversation".to_string());
+    }
+
+    llm::processor::process_conversation(&llm, &db.inner().clone(), &conversation_id, &transcript).await?;
+
+    Ok(format!("Processed conversation {}", conversation_id))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_path = db::db_path();
@@ -182,6 +222,9 @@ pub fn run() {
         Vad::new().expect("failed to initialize Silero VAD"),
     ));
     let speech_buffer = Arc::new(Mutex::new(SpeechBuffer::new()));
+
+    // Default to Ollama with a common model — configurable later via settings
+    let llm_client = Arc::new(LlmClient::ollama("llama3.2"));
 
     tauri::Builder::default()
         .setup(|app| {
@@ -200,6 +243,7 @@ pub fn run() {
         .manage(transcriber_holder)
         .manage(vad)
         .manage(speech_buffer)
+        .manage(llm_client)
         .invoke_handler(tauri::generate_handler![
             get_db_stats,
             list_audio_devices,
@@ -210,6 +254,8 @@ pub fn run() {
             init_transcriber,
             transcribe_pending,
             has_whisper_model,
+            check_llm_status,
+            process_conversation_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -25,8 +25,8 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 - [x] Buffer speech segments between VAD boundaries (~480ms silence = end of speech)
 - [x] Store transcript segments in SQLite with timestamps
 - [x] Frontend recording controls (FAB toggle, listening indicator, audio level)
-- [ ] Live transcription view in React UI (showing segments as they come in)
-- [ ] System audio capture via PipeWire monitor source
+- [x] Live transcription view in React UI (auto-polls every 2s, shows segments)
+- [ ] System audio capture via PipeWire monitor source (deferred — mic capture covers primary use case)
 
 ---
 

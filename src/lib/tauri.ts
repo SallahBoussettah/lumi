@@ -46,3 +46,11 @@ export interface TranscriptSegment {
 export async function transcribePending(): Promise<TranscriptSegment[]> {
   return invoke("transcribe_pending");
 }
+
+export async function checkLlmStatus(): Promise<boolean> {
+  return invoke("check_llm_status");
+}
+
+export async function processConversation(conversationId: string): Promise<string> {
+  return invoke("process_conversation_cmd", { conversationId });
+}
