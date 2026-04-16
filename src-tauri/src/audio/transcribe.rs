@@ -53,30 +53,27 @@ impl Transcriber {
             .full(params, samples)
             .map_err(|e| format!("Whisper transcription failed: {}", e))?;
 
-        let num_segments = state.full_n_segments().unwrap_or(0);
+        let num_segments = state.full_n_segments();
         let mut results = Vec::new();
 
         for i in 0..num_segments {
-            let text = state
-                .full_get_segment_text(i)
-                .map_err(|e| format!("Failed to get segment text: {}", e))?;
+            let segment = match state.get_segment(i) {
+                Some(s) => s,
+                None => continue,
+            };
 
-            let text = text.trim().to_string();
+            let text = segment
+                .to_str()
+                .map_err(|e| format!("Failed to get segment text: {}", e))?
+                .trim()
+                .to_string();
             if text.is_empty() {
                 continue;
             }
 
-            let start_ms = state
-                .full_get_segment_t0(i)
-                .map_err(|e| format!("Failed to get segment start: {}", e))?
-                as i64
-                * 10; // whisper uses centiseconds
-
-            let end_ms = state
-                .full_get_segment_t1(i)
-                .map_err(|e| format!("Failed to get segment end: {}", e))?
-                as i64
-                * 10;
+            // Whisper timestamps are in centiseconds; convert to ms
+            let start_ms = segment.start_timestamp() * 10;
+            let end_ms = segment.end_timestamp() * 10;
 
             results.push(TranscriptSegment {
                 text,
