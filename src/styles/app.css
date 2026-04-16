@@ -1080,3 +1080,50 @@ html.floating-host #root {
   background: oklch(1 0 0 / 0.15);
   color: var(--text-1);
 }
+
+/* Recent sessions list (shown when bar opens with no active session) */
+.fb-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.fb-recent-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  padding: 0 4px 4px;
+}
+
+.fb-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  transition: background var(--dur-instant) var(--ease-out);
+}
+
+.fb-recent-item:hover {
+  background: oklch(1 0 0 / 0.05);
+  color: var(--text-1);
+}
+
+.fb-recent-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

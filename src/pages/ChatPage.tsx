@@ -20,7 +20,12 @@ interface DisplayMessage {
   sources?: SearchHit[];
 }
 
-export function ChatPage() {
+interface ChatPageProps {
+  initialSessionId?: string | null;
+  onSessionConsumed?: () => void;
+}
+
+export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps = {}) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -41,7 +46,6 @@ export function ChatPage() {
   useEffect(() => {
     checkLlmStatus().then(setLlmReady).catch(() => setLlmReady(false));
     loadSessions();
-    // Backfill embeddings for older items (silent, idempotent — only embeds missing ones)
     reindexEmbeddings()
       .then((r) => {
         if (r.total > 0) {
@@ -52,6 +56,14 @@ export function ChatPage() {
       })
       .catch(() => {});
   }, [loadSessions]);
+
+  // If we were navigated here from the floating bar with a session id, open it
+  useEffect(() => {
+    if (initialSessionId) {
+      setActiveSession(initialSessionId);
+      onSessionConsumed?.();
+    }
+  }, [initialSessionId, onSessionConsumed]);
 
   useEffect(() => {
     if (!activeSession) {

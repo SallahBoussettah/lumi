@@ -11,14 +11,17 @@ import {
   chatSend,
   hideFloatingBar,
   floatingBarResize,
-  showMainWindow,
+  showMainWindowWithChat,
+  listChatSessions,
+  getChatMessages,
 } from "../lib/tauri";
-import type { TranscriptSegment } from "../lib/tauri";
+import type { TranscriptSegment, ChatSession } from "../lib/tauri";
 
 const COMPACT_W = 60;
 const COMPACT_H = 14;
 const EXPANDED_W = 480;
 const EXPANDED_H = 140;
+const EXPANDED_WITH_HISTORY_H = 240;
 const RECORDING_H = 200;
 
 type Mode = "compact" | "expanded" | "recording" | "answer";
@@ -33,6 +36,7 @@ export function FloatingBar() {
   // Persist the chat session across messages so the assistant remembers
   // what we've been discussing in this floating-bar session.
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [recentSessions, setRecentSessions] = useState<ChatSession[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const transcribePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -40,6 +44,9 @@ export function FloatingBar() {
   useEffect(() => {
     const resize = (w: number, h: number) =>
       floatingBarResize(w, h).catch(() => {});
+
+    const showHistory =
+      mode === "expanded" && !sessionId && recentSessions.length > 0;
 
     switch (mode) {
       case "compact":
@@ -52,14 +59,26 @@ export function FloatingBar() {
         resize(EXPANDED_W, RECORDING_H);
         break;
       default:
-        resize(EXPANDED_W, EXPANDED_H);
+        resize(EXPANDED_W, showHistory ? EXPANDED_WITH_HISTORY_H : EXPANDED_H);
     }
-  }, [mode]);
+  }, [mode, sessionId, recentSessions.length]);
 
-  // Sync recording state
+  // Sync recording state + load recent sessions on mount
   useEffect(() => {
     checkRecording().then(setRecording).catch(() => {});
+    listChatSessions()
+      .then((s) => setRecentSessions(s.slice(0, 5)))
+      .catch(() => {});
   }, []);
+
+  // Reload recent sessions when bar transitions from compact (re-opened)
+  useEffect(() => {
+    if (mode === "expanded" && !sessionId) {
+      listChatSessions()
+        .then((s) => setRecentSessions(s.slice(0, 5)))
+        .catch(() => {});
+    }
+  }, [mode, sessionId]);
 
   // Poll for transcript while recording (live preview only — full processing skipped on cancel)
   useEffect(() => {
@@ -99,11 +118,16 @@ export function FloatingBar() {
 
   // Explicit Tauri startDragging — `data-tauri-drag-region` is unreliable on
   // Wayland; calling it programmatically from a mousedown event works.
+  // KEY: Wayland (KWin) requires the window be FOCUSED before it honors
+  // xdg_toplevel.move(). Our window starts with focus:false so we must
+  // explicitly grab focus first or the drag silently does nothing.
   async function startDrag(e: React.MouseEvent) {
     if (e.button !== 0) return;
     e.preventDefault();
+    const win = getCurrentWindow();
     try {
-      await getCurrentWindow().startDragging();
+      await win.setFocus();
+      await win.startDragging();
     } catch (err) {
       console.error("Drag failed:", err);
     }
@@ -209,7 +233,21 @@ export function FloatingBar() {
   }
 
   function handleOpenMain() {
-    showMainWindow().catch(() => {});
+    // If a session is active, jump straight to it in the main chat view
+    showMainWindowWithChat(sessionId).catch(() => {});
+  }
+
+  async function handleResumeSession(s: ChatSession) {
+    try {
+      const messages = await getChatMessages(s.id);
+      // Surface the last assistant message so the user can see context
+      const lastAsst = [...messages].reverse().find((m) => m.sender === "assistant");
+      setSessionId(s.id);
+      setAnswer(lastAsst ? lastAsst.text : "Continuing where we left off.");
+      setMode("answer");
+    } catch (e) {
+      console.error("Resume failed:", e);
+    }
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -240,6 +278,31 @@ export function FloatingBar() {
     <div className="fb-root fb-expanded" onMouseLeave={handleLeave}>
       {/* drag handle */}
       <div className="fb-drag" onMouseDown={startDrag} />
+
+      {/* Recent sessions — only when no active session and we have history */}
+      {mode === "expanded" && !sessionId && recentSessions.length > 0 && (
+        <div className="fb-recent">
+          <div className="fb-recent-label">Resume</div>
+          {recentSessions.map((s) => (
+            <button
+              key={s.id}
+              className="fb-recent-item"
+              onClick={() => handleResumeSession(s)}
+              title={s.title || "Untitled chat"}
+            >
+              <span
+                className="material-symbols-outlined"
+                style={{ fontSize: 12, opacity: 0.6 }}
+              >
+                forum
+              </span>
+              <span className="fb-recent-text">
+                {s.title || "Untitled"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {mode === "answer" && answer && (
         <div className="fb-answer">{answer}</div>

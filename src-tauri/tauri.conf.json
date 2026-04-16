@@ -32,7 +32,7 @@
         "minHeight": 14,
         "x": 100,
         "y": 60,
-        "resizable": false,
+        "resizable": true,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

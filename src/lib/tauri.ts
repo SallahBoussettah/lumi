@@ -41,6 +41,11 @@ export async function showMainWindow(): Promise<void> {
   return invoke("show_main_window");
 }
 
+/** Show main window AND emit an event so it navigates to a specific chat session. */
+export async function showMainWindowWithChat(sessionId: string | null): Promise<void> {
+  return invoke("show_main_window_with_chat", { sessionId });
+}
+
 export async function getAudioLevel(): Promise<number> {
   return invoke("get_audio_level");
 }

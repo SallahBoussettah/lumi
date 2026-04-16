@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Sidebar } from "./components/Sidebar";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { ConversationDetailPage } from "./pages/ConversationDetailPage";
@@ -29,7 +30,24 @@ export function App() {
   const [activePage, setActivePage] = useState<Page>("conversations");
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
+  const [pendingChatSession, setPendingChatSession] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+
+  // Listen for "open-chat-session" event from the floating bar.
+  // Switches to the Chat page and (optionally) selects a specific session.
+  useEffect(() => {
+    const unlisten = listen<string | null>("open-chat-session", (event) => {
+      setActivePage("chat");
+      setSelectedConversationId(null);
+      setSelectedMemoryId(null);
+      if (event.payload) {
+        setPendingChatSession(event.payload);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
     const apply = () => {
@@ -101,7 +119,12 @@ export function App() {
       case "tasks":
         return <TasksPage />;
       case "chat":
-        return <ChatPage />;
+        return (
+          <ChatPage
+            initialSessionId={pendingChatSession}
+            onSessionConsumed={() => setPendingChatSession(null)}
+          />
+        );
       case "rewind":
         return <RewindPage />;
       case "focus":

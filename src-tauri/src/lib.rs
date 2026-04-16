@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
 };
 
 /// Wrapper to make cpal::Stream usable in Tauri state (Send + Sync)
@@ -1077,8 +1077,28 @@ fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("Main window not found")?;
+    // Order matters on Linux/Wayland: unminimize first, then show, then focus
+    let _ = window.unminimize();
     window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())?;
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// Show main window AND emit an event the frontend listens for to navigate
+/// somewhere specific. Used by the floating bar's "open in main" button.
+#[tauri::command]
+fn show_main_window_with_chat(
+    app: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Main window not found")?;
+    let _ = window.unminimize();
+    window.show().map_err(|e| e.to_string())?;
+    let _ = window.set_focus();
+    // Tell the main window to open the chat page (and the specific session if given)
+    let _ = window.emit("open-chat-session", session_id);
     Ok(())
 }
 
@@ -1238,6 +1258,7 @@ pub fn run() {
             hide_floating_bar,
             floating_bar_resize,
             show_main_window,
+            show_main_window_with_chat,
             chat_send,
             list_chat_sessions,
             get_chat_messages,
