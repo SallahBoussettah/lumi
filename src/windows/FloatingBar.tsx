@@ -29,6 +29,9 @@ export function FloatingBar() {
   const [liveText, setLiveText] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
+  // Persist the chat session across messages so the assistant remembers
+  // what we've been discussing in this floating-bar session.
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const transcribePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -106,7 +109,8 @@ export function FloatingBar() {
     setThinking(true);
     setAnswer(null);
     try {
-      const result = await chatSend(text, null);
+      const result = await chatSend(text, sessionId);
+      setSessionId(result.session_id);
       setAnswer(result.answer);
       setMode("answer");
       setInput("");
@@ -137,12 +141,13 @@ export function FloatingBar() {
       setRecording(false);
       // Use the captured live text as the input for chat
       if (liveText.trim()) {
-        setInput(liveText.trim());
+        const text = liveText.trim();
         setLiveText("");
-        // Auto-send
+        // Auto-send to current session
         setThinking(true);
         setAnswer(null);
-        const result = await chatSend(liveText.trim(), null);
+        const result = await chatSend(text, sessionId);
+        setSessionId(result.session_id);
         setAnswer(result.answer);
         setMode("answer");
         setInput("");
@@ -171,14 +176,23 @@ export function FloatingBar() {
   }
 
   function handleClose() {
-    // Reset and hide
+    // Reset and hide — also drop the chat session so next open is fresh
     setMode("compact");
     setInput("");
     setAnswer(null);
     setLiveText("");
+    setSessionId(null);
     if (recording) cancelRecording().catch(() => {});
     setRecording(false);
     hideFloatingBar().catch(() => {});
+  }
+
+  function handleNewChat() {
+    setSessionId(null);
+    setAnswer(null);
+    setInput("");
+    setMode("expanded");
+    setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   function handleOpenMain() {
@@ -272,6 +286,17 @@ export function FloatingBar() {
 
       {/* footer chrome */}
       <div className="fb-footer">
+        {sessionId && (
+          <button
+            className="fb-icon-btn"
+            onClick={handleNewChat}
+            title="New chat (clear context)"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
+              add
+            </span>
+          </button>
+        )}
         <button className="fb-icon-btn" onClick={handleOpenMain} title="Open main window">
           <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
             open_in_new
@@ -283,6 +308,24 @@ export function FloatingBar() {
           </span>
         </button>
       </div>
+
+      {/* Subtle session indicator */}
+      {sessionId && mode !== "recording" && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 4,
+            left: 12,
+            fontSize: 9,
+            color: "var(--text-4)",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            pointerEvents: "none",
+          }}
+        >
+          continuing chat
+        </div>
+      )}
     </div>
   );
 }
