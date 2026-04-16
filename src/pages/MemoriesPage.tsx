@@ -8,7 +8,11 @@ const FILTERS = [
   { id: "interesting", label: "Worth knowing" },
 ];
 
-export function MemoriesPage() {
+interface Props {
+  onOpenMemory: (id: string) => void;
+}
+
+export function MemoriesPage({ onOpenMemory }: Props) {
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [filter, setFilter] = useState("all");
 
@@ -58,7 +62,11 @@ export function MemoriesPage() {
       ) : (
         <div>
           {filtered.map((mem) => (
-            <div key={mem.id} className="conv-row">
+            <div
+              key={mem.id}
+              className="conv-row"
+              onClick={() => onOpenMemory(mem.id)}
+            >
               <div className="conv-icon">
                 <span className="material-symbols-outlined">
                   {mem.category === "system" ? "person" : "auto_awesome"}

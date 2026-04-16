@@ -168,6 +168,42 @@ export async function reindexEmbeddings(): Promise<ReindexResult> {
   return invoke("reindex_embeddings");
 }
 
+// ===== MEMORY MANAGEMENT =====
+
+export interface MemoryDetail {
+  memory: {
+    id: string;
+    content: string;
+    category: string;
+    conversation_id: string | null;
+    manually_added: boolean;
+    created_at: string;
+    updated_at: string;
+    is_dismissed: boolean;
+  };
+  source_conversation: Conversation | null;
+}
+
+export async function getMemoryDetail(id: string): Promise<MemoryDetail> {
+  return invoke("get_memory_detail", { id });
+}
+
+export async function updateMemory(
+  id: string,
+  content: string | null,
+  category: string | null
+): Promise<string> {
+  return invoke("update_memory", { id, content, category });
+}
+
+export async function dismissMemory(id: string): Promise<string> {
+  return invoke("dismiss_memory", { id });
+}
+
+export async function deleteMemory(id: string): Promise<string> {
+  return invoke("delete_memory", { id });
+}
+
 export interface Conversation {
   id: string;
   title: string | null;

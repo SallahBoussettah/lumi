@@ -707,8 +707,140 @@ fn delete_conversation(
     let conn = db.conn();
     conn.execute("DELETE FROM conversations WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;
-    // ON DELETE CASCADE handles transcript_segments
-    // memories/action_items use ON DELETE SET NULL
+    Ok("Deleted".to_string())
+}
+
+// =====================================================
+// MEMORY MANAGEMENT
+// =====================================================
+
+/// Get a single memory with its source conversation (if any).
+#[tauri::command]
+fn get_memory_detail(
+    id: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+
+    let mem: serde_json::Value = conn
+        .query_row(
+            "SELECT id, content, category, conversation_id, manually_added, created_at, updated_at, is_dismissed
+             FROM memories WHERE id = ?1",
+            [&id],
+            |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, String>(0)?,
+                    "content": row.get::<_, String>(1)?,
+                    "category": row.get::<_, String>(2)?,
+                    "conversation_id": row.get::<_, Option<String>>(3)?,
+                    "manually_added": row.get::<_, bool>(4)?,
+                    "created_at": row.get::<_, String>(5)?,
+                    "updated_at": row.get::<_, String>(6)?,
+                    "is_dismissed": row.get::<_, bool>(7)?,
+                }))
+            },
+        )
+        .map_err(|e| format!("Memory not found: {}", e))?;
+
+    let source_conv: Option<serde_json::Value> = mem
+        .get("conversation_id")
+        .and_then(|v| v.as_str())
+        .and_then(|cid| {
+            conn.query_row(
+                "SELECT id, title, overview, emoji, category, started_at FROM conversations WHERE id = ?1",
+                [cid],
+                |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, String>(0)?,
+                        "title": row.get::<_, Option<String>>(1)?,
+                        "overview": row.get::<_, Option<String>>(2)?,
+                        "emoji": row.get::<_, Option<String>>(3)?,
+                        "category": row.get::<_, Option<String>>(4)?,
+                        "started_at": row.get::<_, String>(5)?,
+                    }))
+                },
+            )
+            .ok()
+        });
+
+    Ok(serde_json::json!({
+        "memory": mem,
+        "source_conversation": source_conv,
+    }))
+}
+
+/// Update a memory's content and/or category. Re-embeds for RAG search.
+#[tauri::command]
+async fn update_memory(
+    id: String,
+    content: Option<String>,
+    category: Option<String>,
+    db: tauri::State<'_, Arc<Database>>,
+    embedder: tauri::State<'_, Arc<Embedder>>,
+) -> Result<String, String> {
+    if content.is_none() && category.is_none() {
+        return Err("Nothing to update".to_string());
+    }
+
+    {
+        let conn = db.conn();
+        if let Some(c) = &content {
+            conn.execute(
+                "UPDATE memories SET content = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![c, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if let Some(cat) = &category {
+            conn.execute(
+                "UPDATE memories SET category = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![cat, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Re-embed if content changed
+    if let Some(c) = content {
+        let _ = llm::rag::store_embedding(&embedder, &db.inner().clone(), "memory", &id, &c).await;
+    }
+
+    Ok("Updated".to_string())
+}
+
+/// Delete (dismiss) a memory. Hides it from views but keeps the row.
+#[tauri::command]
+fn dismiss_memory(
+    id: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<String, String> {
+    let conn = db.conn();
+    conn.execute(
+        "UPDATE memories SET is_dismissed = 1, updated_at = datetime('now') WHERE id = ?1",
+        [&id],
+    )
+    .map_err(|e| e.to_string())?;
+    // Also remove from embeddings so chat doesn't surface it
+    let _ = conn.execute(
+        "DELETE FROM embeddings WHERE entity_type = 'memory' AND entity_id = ?1",
+        [&id],
+    );
+    Ok("Dismissed".to_string())
+}
+
+/// Permanently delete a memory.
+#[tauri::command]
+fn delete_memory(
+    id: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<String, String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM memories WHERE id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    let _ = conn.execute(
+        "DELETE FROM embeddings WHERE entity_type = 'memory' AND entity_id = ?1",
+        [&id],
+    );
     Ok("Deleted".to_string())
 }
 
@@ -892,6 +1024,10 @@ pub fn run() {
             get_chat_messages,
             delete_chat_session,
             reindex_embeddings,
+            get_memory_detail,
+            update_memory,
+            dismiss_memory,
+            delete_memory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

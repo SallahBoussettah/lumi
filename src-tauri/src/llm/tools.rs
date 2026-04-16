@@ -110,6 +110,60 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 }),
             },
         },
+        ToolDef {
+            kind: "function".into(),
+            function: ToolFunction {
+                name: "update_memory".into(),
+                description: "Edit an existing memory's content. Use when the user wants to fix a typo, clarify, or rewrite a memory. Find the memory by keywords from its current text.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "search": {
+                            "type": "string",
+                            "description": "Keywords from the existing memory to find it (case-insensitive substring)."
+                        },
+                        "new_content": {
+                            "type": "string",
+                            "description": "The corrected or rewritten memory, max 15 words."
+                        }
+                    },
+                    "required": ["search", "new_content"]
+                }),
+            },
+        },
+        ToolDef {
+            kind: "function".into(),
+            function: ToolFunction {
+                name: "delete_memory".into(),
+                description: "Remove a memory permanently. Use when the user says it's wrong, irrelevant, or asks to forget it.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "search": {
+                            "type": "string",
+                            "description": "Keywords from the memory to find and delete."
+                        }
+                    },
+                    "required": ["search"]
+                }),
+            },
+        },
+        ToolDef {
+            kind: "function".into(),
+            function: ToolFunction {
+                name: "list_memories".into(),
+                description: "List the user's saved memories. Useful when the user asks 'what do you remember about X', 'show me my memories', or wants an audit.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "search": {
+                            "type": "string",
+                            "description": "Optional keyword filter. If omitted, returns recent memories."
+                        }
+                    }
+                }),
+            },
+        },
     ]
 }
 
@@ -130,6 +184,9 @@ pub async fn execute_tool(
         "update_task" => update_task(&args, db).await,
         "list_tasks" => list_tasks(&args, db).await,
         "create_memory" => create_memory(&args, db, embedder).await,
+        "update_memory" => update_memory_tool(&args, db, embedder).await,
+        "delete_memory" => delete_memory_tool(&args, db).await,
+        "list_memories" => list_memories_tool(&args, db).await,
         _ => Err(format!("Unknown tool: {}", name)),
     }
 }
@@ -315,6 +372,150 @@ async fn list_tasks(args: &Value, db: &Arc<Database>) -> Result<String, String> 
         let mark = if *done { "[x]" } else { "[ ]" };
         let p = prio.as_deref().unwrap_or("medium");
         out.push_str(&format!("  {} ({}) {}\n", mark, p, desc));
+    }
+    Ok(out)
+}
+
+async fn update_memory_tool(
+    args: &Value,
+    db: &Arc<Database>,
+    embedder: &Embedder,
+) -> Result<String, String> {
+    let search = args
+        .get("search")
+        .and_then(Value::as_str)
+        .ok_or("Missing 'search'")?;
+    let new_content = args
+        .get("new_content")
+        .and_then(Value::as_str)
+        .ok_or("Missing 'new_content'")?;
+
+    let pattern = format!("%{}%", search.to_lowercase());
+
+    // Find the matching memory
+    let row: Option<(String, String)> = {
+        let conn = db.conn();
+        conn.query_row(
+            "SELECT id, content FROM memories
+             WHERE is_dismissed = 0 AND LOWER(content) LIKE ?1
+             ORDER BY created_at DESC LIMIT 1",
+            [&pattern],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .ok()
+    };
+
+    let Some((id, original)) = row else {
+        return Ok(format!("No memory matching '{}' found.", search));
+    };
+
+    {
+        let conn = db.conn();
+        conn.execute(
+            "UPDATE memories SET content = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![new_content, id],
+        )
+        .map_err(|e| format!("DB update failed: {}", e))?;
+    }
+
+    // Re-embed so chat retrieval finds the updated version
+    let _ = rag::store_embedding(embedder, db, "memory", &id, new_content).await;
+
+    Ok(format!(
+        "Memory updated. Was: \"{}\" — now: \"{}\"",
+        original, new_content
+    ))
+}
+
+async fn delete_memory_tool(args: &Value, db: &Arc<Database>) -> Result<String, String> {
+    let search = args
+        .get("search")
+        .and_then(Value::as_str)
+        .ok_or("Missing 'search'")?;
+
+    let pattern = format!("%{}%", search.to_lowercase());
+
+    let row: Option<(String, String)> = {
+        let conn = db.conn();
+        conn.query_row(
+            "SELECT id, content FROM memories
+             WHERE is_dismissed = 0 AND LOWER(content) LIKE ?1
+             ORDER BY created_at DESC LIMIT 1",
+            [&pattern],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .ok()
+    };
+
+    let Some((id, content)) = row else {
+        return Ok(format!("No memory matching '{}' found.", search));
+    };
+
+    {
+        let conn = db.conn();
+        conn.execute("DELETE FROM memories WHERE id = ?1", [&id])
+            .map_err(|e| format!("DB delete failed: {}", e))?;
+        let _ = conn.execute(
+            "DELETE FROM embeddings WHERE entity_type = 'memory' AND entity_id = ?1",
+            [&id],
+        );
+    }
+
+    Ok(format!("Memory deleted: \"{}\"", content))
+}
+
+async fn list_memories_tool(args: &Value, db: &Arc<Database>) -> Result<String, String> {
+    let search = args.get("search").and_then(Value::as_str);
+
+    let rows: Vec<(String, String, String)> = {
+        let conn = db.conn();
+        let row_to_tuple = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(String, String, String)> {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        };
+        if let Some(s) = search {
+            let pattern = format!("%{}%", s.to_lowercase());
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, content, category FROM memories
+                     WHERE is_dismissed = 0 AND LOWER(content) LIKE ?1
+                     ORDER BY created_at DESC LIMIT 30",
+                )
+                .map_err(|e| e.to_string())?;
+            let collected: Vec<(String, String, String)> = stmt
+                .query_map([&pattern], row_to_tuple)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            collected
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, content, category FROM memories
+                     WHERE is_dismissed = 0
+                     ORDER BY created_at DESC LIMIT 20",
+                )
+                .map_err(|e| e.to_string())?;
+            let collected: Vec<(String, String, String)> = stmt
+                .query_map([], row_to_tuple)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            collected
+        }
+    };
+
+    if rows.is_empty() {
+        let suffix = search.map(|s| format!(" matching '{}'", s)).unwrap_or_default();
+        return Ok(format!("No memories{}.", suffix));
+    }
+
+    let mut out = format!("{} memory/memories:\n", rows.len());
+    for (_, content, category) in &rows {
+        out.push_str(&format!("  - [{}] {}\n", category, content));
     }
     Ok(out)
 }

@@ -3,6 +3,7 @@ import { Sidebar } from "./components/Sidebar";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { ConversationDetailPage } from "./pages/ConversationDetailPage";
 import { MemoriesPage } from "./pages/MemoriesPage";
+import { MemoryDetailPage } from "./pages/MemoryDetailPage";
 import { TasksPage } from "./pages/TasksPage";
 import { ChatPage } from "./pages/ChatPage";
 import { RewindPage } from "./pages/RewindPage";
@@ -19,7 +20,6 @@ export type Page =
   | "focus"
   | "settings";
 
-/** Time-of-day warmth (0..1) — peaks around 1pm */
 function todWarmth(): number {
   const h = new Date().getHours() + new Date().getMinutes() / 60;
   return Math.max(0, 1 - Math.abs(h - 13) / 12);
@@ -28,6 +28,7 @@ function todWarmth(): number {
 export function App() {
   const [activePage, setActivePage] = useState<Page>("conversations");
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
 
   useEffect(() => {
@@ -51,14 +52,24 @@ export function App() {
   function navigate(page: Page) {
     setActivePage(page);
     setSelectedConversationId(null);
+    setSelectedMemoryId(null);
   }
 
   function openConversation(id: string) {
+    setActivePage("conversations");
     setSelectedConversationId(id);
+    setSelectedMemoryId(null);
   }
 
-  function closeConversation() {
+  function openMemory(id: string) {
+    setActivePage("memories");
+    setSelectedMemoryId(id);
     setSelectedConversationId(null);
+  }
+
+  function clearDetail() {
+    setSelectedConversationId(null);
+    setSelectedMemoryId(null);
   }
 
   function renderPage() {
@@ -66,8 +77,18 @@ export function App() {
       return (
         <ConversationDetailPage
           conversationId={selectedConversationId}
-          onBack={closeConversation}
-          onDeleted={closeConversation}
+          onBack={clearDetail}
+          onDeleted={clearDetail}
+        />
+      );
+    }
+    if (activePage === "memories" && selectedMemoryId) {
+      return (
+        <MemoryDetailPage
+          memoryId={selectedMemoryId}
+          onBack={clearDetail}
+          onOpenConversation={openConversation}
+          onDeleted={clearDetail}
         />
       );
     }
@@ -76,7 +97,7 @@ export function App() {
       case "conversations":
         return <ConversationsPage onOpenConversation={openConversation} />;
       case "memories":
-        return <MemoriesPage />;
+        return <MemoriesPage onOpenMemory={openMemory} />;
       case "tasks":
         return <TasksPage />;
       case "chat":
