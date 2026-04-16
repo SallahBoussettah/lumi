@@ -111,11 +111,15 @@ export function App() {
     }
   }
 
+  // Chat page fills the main area itself (sticky input at bottom).
+  // All other pages use the standard centered, padded layout.
+  const isChat = activePage === "chat";
+
   return (
     <div className={`app-layout ${recording ? "is-listening" : ""}`}>
       <Sidebar activePage={activePage} onNavigate={navigate} />
-      <main className="app-main">
-        <div className="app-content">{renderPage()}</div>
+      <main className={`app-main ${isChat ? "app-main--chat" : ""}`}>
+        {isChat ? renderPage() : <div className="app-content">{renderPage()}</div>}
       </main>
     </div>
   );

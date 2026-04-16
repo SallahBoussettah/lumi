@@ -72,6 +72,19 @@ body {
   position: relative;
 }
 
+.app-main--chat {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--space-10) var(--content-pad) 0;
+}
+
+.app-main--chat > * {
+  max-width: 880px;
+  width: 100%;
+  margin: 0 auto;
+}
+
 .app-content {
   padding: var(--space-10) var(--content-pad);
   max-width: 880px;
@@ -582,8 +595,8 @@ body {
 .chat-shell {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-height: calc(100vh - var(--space-10) * 2);
+  flex: 1;
+  min-height: 0;
 }
 
 .chat-thread {
@@ -593,6 +606,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+  min-height: 0;
 }
 
 .chat-msg {
@@ -659,9 +673,8 @@ body {
 }
 
 .chat-input-bar {
-  position: sticky;
-  bottom: 0;
-  padding: var(--space-3) 0;
+  flex-shrink: 0;
+  padding: var(--space-3) 0 var(--space-6);
   background: linear-gradient(to top, var(--surface-base) 70%, transparent);
 }
 
