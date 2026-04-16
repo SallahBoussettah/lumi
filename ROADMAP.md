@@ -21,11 +21,13 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 
 - [x] PipeWire/PulseAudio mic capture in Rust via cpal (auto-resample to 16kHz mono)
 - [x] Integrate Silero VAD (voice_activity_detector crate, bundled ONNX model)
-- [x] Integrate whisper.cpp (whisper-rs crate) for local STT — auto-downloads ggml-base.en model
+- [x] Integrate whisper.cpp (whisper-rs 0.16) for local STT
 - [x] Buffer speech segments between VAD boundaries (~480ms silence = end of speech)
 - [x] Store transcript segments in SQLite with timestamps
 - [x] Frontend recording controls (FAB toggle, listening indicator, audio level)
 - [x] Live transcription view in React UI (auto-polls every 2s, shows segments)
+- [x] **Tier 1**: Upgraded whisper to Large-v3-Turbo (1.5GB, 6× faster than full Large-v3)
+- [x] **Tier 2**: GPU acceleration via ROCm/hipblas — whisper now runs on RX 9070 XT
 - [ ] System audio capture via PipeWire monitor source (deferred — mic capture covers primary use case)
 
 ---
@@ -118,14 +120,15 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React + TypeScript + Tailwind CSS |
+| Frontend | React + TypeScript + plain CSS (custom design tokens) |
 | Desktop | Tauri v2 (Rust) |
 | Database | SQLite (WAL) + FTS5 |
-| Icons | Lucide React |
-| Audio | PipeWire / PulseAudio |
-| Screen | PipeWire XDG Portal |
-| STT | faster-whisper / whisper.cpp |
-| VAD | Silero ONNX |
-| OCR | Tesseract |
-| LLM | Ollama (local) + optional cloud |
-| Embeddings | sentence-transformers / ONNX |
+| Icons | Material Symbols Outlined |
+| Fonts | Geist (body) + Newsreader (display) |
+| Audio capture | cpal (PipeWire/PulseAudio backend) |
+| Screen | PipeWire XDG Portal (Phase 5) |
+| STT | whisper-rs 0.16 + Large-v3-Turbo on ROCm GPU |
+| VAD | Silero ONNX (voice_activity_detector crate) |
+| OCR | Tesseract (Phase 5) |
+| LLM | Ollama (qwen2.5:7b/14b, hot-swappable) |
+| Embeddings | sentence-transformers / ONNX (Phase 4) |
