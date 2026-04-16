@@ -1,4 +1,12 @@
-const conversations = [
+import { useState, useEffect, useRef } from "react";
+import {
+  startRecording,
+  stopRecording,
+  getAudioLevel,
+  isRecording as checkRecording,
+} from "../lib/tauri";
+
+const mockConversations = [
   { id: "1", icon: "build", title: "Omniscient Architecture Sync", overview: "Discussed memory indexing latency improvements and ambient listening protocols", time: "3h ago", tag: "work" },
   { id: "2", icon: "nightlight", title: "Evening Reflection", overview: "Personal notes on today's focus levels and evening wind-down routine", time: "5h ago", tag: "personal" },
   { id: "3", icon: "lightbulb", title: "Neural Interface Concept", overview: "Mapping memory clusters to spatial coordinates in a virtual room", time: "8h ago", tag: "idea" },
@@ -12,6 +20,52 @@ function getGreeting(): string {
 }
 
 export function ConversationsPage() {
+  const [recording, setRecording] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const levelInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Check initial recording state
+  useEffect(() => {
+    checkRecording().then(setRecording).catch(() => {});
+  }, []);
+
+  // Poll audio level while recording
+  useEffect(() => {
+    if (recording) {
+      levelInterval.current = setInterval(async () => {
+        try {
+          const level = await getAudioLevel();
+          setAudioLevel(level);
+        } catch {
+          // ignore
+        }
+      }, 100);
+    } else {
+      if (levelInterval.current) {
+        clearInterval(levelInterval.current);
+        levelInterval.current = null;
+      }
+      setAudioLevel(0);
+    }
+    return () => {
+      if (levelInterval.current) clearInterval(levelInterval.current);
+    };
+  }, [recording]);
+
+  async function toggleRecording() {
+    try {
+      if (recording) {
+        await stopRecording();
+        setRecording(false);
+      } else {
+        await startRecording();
+        setRecording(true);
+      }
+    } catch (err) {
+      console.error("Recording toggle failed:", err);
+    }
+  }
+
   return (
     <>
       <div className="page-header">
@@ -20,10 +74,15 @@ export function ConversationsPage() {
             <h1 className="page-title">{getGreeting()}, Salah</h1>
             <p className="page-subtitle">5 conversations today. 4 memories extracted.</p>
           </div>
-          <div className="recording-pill">
-            <span className="recording-dot" />
-            Listening
-          </div>
+          {recording && (
+            <div className="recording-pill">
+              <span className="recording-dot" />
+              Listening
+              <span style={{ marginLeft: 4, opacity: 0.6 }}>
+                {audioLevel > 0 && `${audioLevel}%`}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -43,7 +102,7 @@ export function ConversationsPage() {
       </div>
 
       <div className="conversation-list">
-        {conversations.map((c) => (
+        {mockConversations.map((c) => (
           <div key={c.id} className="conversation-row">
             <span className="material-symbols-outlined conversation-emoji">{c.icon}</span>
             <div className="conversation-content">
@@ -78,8 +137,41 @@ export function ConversationsPage() {
         </div>
       </div>
 
-      <button className="fab">
-        <span className="material-symbols-outlined" style={{ fontSize: "22px" }}>mic</span>
+      {/* Audio level visualizer when recording */}
+      {recording && (
+        <div style={{
+          position: "fixed",
+          bottom: 84,
+          right: 24,
+          width: 48,
+          height: 4,
+          borderRadius: 2,
+          background: "rgba(255,255,255,0.06)",
+          overflow: "hidden",
+        }}>
+          <div style={{
+            width: `${audioLevel}%`,
+            height: "100%",
+            borderRadius: 2,
+            background: "var(--green)",
+            transition: "width 0.1s ease",
+          }} />
+        </div>
+      )}
+
+      <button
+        className="fab"
+        onClick={toggleRecording}
+        style={{
+          background: recording ? "var(--green)" : "var(--accent)",
+          boxShadow: recording
+            ? "0 4px 24px rgba(52, 211, 153, 0.35)"
+            : "0 4px 24px rgba(124, 108, 240, 0.35)",
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: "22px" }}>
+          {recording ? "stop" : "mic"}
+        </span>
       </button>
     </>
   );
