@@ -1,27 +1,12 @@
-import {
-  Eye,
-  MessageCircle,
-  Brain,
-  CheckCircle,
-  Zap,
-  Rewind,
-  Crosshair,
-  Settings,
-} from "lucide-react";
 import type { Page } from "../App";
 
-interface NavItem {
-  id: Page;
-  icon: React.ElementType;
-}
-
-const navItems: NavItem[] = [
-  { id: "conversations", icon: MessageCircle },
-  { id: "memories", icon: Brain },
-  { id: "tasks", icon: CheckCircle },
-  { id: "chat", icon: Zap },
-  { id: "rewind", icon: Rewind },
-  { id: "focus", icon: Crosshair },
+const navItems: { id: Page; icon: string; label: string }[] = [
+  { id: "conversations", icon: "forum", label: "Conversations" },
+  { id: "memories", icon: "neurology", label: "Memories" },
+  { id: "tasks", icon: "task_alt", label: "Tasks" },
+  { id: "chat", icon: "bolt", label: "Chat" },
+  { id: "rewind", icon: "history", label: "Rewind" },
+  { id: "focus", icon: "track_changes", label: "Focus" },
 ];
 
 interface SidebarProps {
@@ -31,62 +16,35 @@ interface SidebarProps {
 
 export function Sidebar({ activePage, onNavigate }: SidebarProps) {
   return (
-    <div className="flex shrink-0">
-      {/* Sidebar */}
-      <aside className="h-screen w-16 bg-bg-sidebar flex flex-col items-center py-8 border-r border-white/5">
-        <div className="mb-12">
-          <Eye className="text-brand-purple opacity-70" size={28} strokeWidth={1.5} />
-        </div>
+    <nav className="app-sidebar">
+      <div className="sidebar-header">
+        <div className="sidebar-logo">O</div>
+        <span className="sidebar-title">Omniscient</span>
+      </div>
 
-        <nav className="flex flex-col items-center gap-8 flex-1">
-          {navItems.map((item) => {
-            const active = activePage === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onNavigate(item.id)}
-                className="group relative flex flex-col items-center transition-all duration-200 cursor-pointer"
-              >
-                <item.icon
-                  size={22}
-                  strokeWidth={1.5}
-                  className={
-                    active
-                      ? "text-white"
-                      : "text-text-muted hover:text-white transition-colors duration-200"
-                  }
-                />
-                {active && (
-                  <div className="absolute -bottom-2 w-1 h-1 bg-brand-purple rounded-full" />
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="mt-auto">
+      <div className="sidebar-section">
+        <div className="sidebar-section-label">Navigate</div>
+        {navItems.map((item) => (
           <button
-            onClick={() => onNavigate("settings")}
-            className="group relative flex flex-col items-center cursor-pointer"
+            key={item.id}
+            className={`sidebar-item ${activePage === item.id ? "active" : ""}`}
+            onClick={() => onNavigate(item.id)}
           >
-            <Settings
-              size={22}
-              strokeWidth={1.5}
-              className={
-                activePage === "settings"
-                  ? "text-white"
-                  : "text-text-muted hover:text-white transition-colors duration-200"
-              }
-            />
-            {activePage === "settings" && (
-              <div className="absolute -bottom-2 w-1 h-1 bg-brand-purple rounded-full" />
-            )}
+            <span className="material-symbols-outlined">{item.icon}</span>
+            {item.label}
           </button>
-        </div>
-      </aside>
+        ))}
+      </div>
 
-      {/* Organic gradient divider */}
-      <div className="h-screen w-px vertical-divider" />
-    </div>
+      <div className="sidebar-spacer" />
+
+      <button
+        className={`sidebar-item ${activePage === "settings" ? "active" : ""}`}
+        onClick={() => onNavigate("settings")}
+      >
+        <span className="material-symbols-outlined">settings</span>
+        Settings
+      </button>
+    </nav>
   );
 }

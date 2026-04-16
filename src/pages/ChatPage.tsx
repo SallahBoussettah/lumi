@@ -1,26 +1,15 @@
-import { Zap } from "lucide-react";
-
 export function ChatPage() {
   return (
-    <div className="p-8 lg:p-12 max-w-5xl">
-      <header className="mb-16">
-        <h1 className="text-[22px] font-light text-text-primary tracking-tight mb-1">
-          Chat
-        </h1>
-        <p className="text-[13px] text-text-tertiary">
-          Ask your AI assistant anything — it knows your conversations and memories.
-        </p>
-      </header>
-
-      <div className="flex flex-col items-center justify-center py-24">
-        <div className="w-16 h-16 rounded-full bg-brand-purple/10 flex items-center justify-center mb-6">
-          <Zap className="text-brand-purple opacity-60" size={28} strokeWidth={1.5} />
-        </div>
-        <p className="text-sm text-text-muted mb-1">Chat coming soon</p>
-        <p className="text-xs text-text-ghost">
-          RAG-powered chat with full context of your activity
-        </p>
+    <>
+      <div className="page-header">
+        <h1 className="page-title">Chat</h1>
+        <p className="page-subtitle">Ask anything — the assistant knows your conversations and memories.</p>
       </div>
-    </div>
+      <div className="empty-state">
+        <span className="material-symbols-outlined">bolt</span>
+        <p className="primary-text">Chat coming soon</p>
+        <p className="secondary-text">Context-aware chat powered by your activity history</p>
+      </div>
+    </>
   );
 }

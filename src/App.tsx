@@ -29,13 +29,12 @@ const pages: Record<Page, () => React.JSX.Element> = {
 
 export function App() {
   const [activePage, setActivePage] = useState<Page>("conversations");
-
   const ActivePage = pages[activePage];
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="app-layout">
       <Sidebar activePage={activePage} onNavigate={setActivePage} />
-      <main className="flex-1 overflow-y-auto overflow-x-hidden">
+      <main className="app-main">
         <ActivePage />
       </main>
     </div>
