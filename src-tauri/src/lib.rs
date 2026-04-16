@@ -52,16 +52,31 @@ fn list_audio_devices() -> Vec<String> {
 }
 
 #[tauri::command]
-fn start_recording(
+async fn start_recording(
     audio_state: tauri::State<'_, Arc<AudioState>>,
     stream_holder: tauri::State<'_, StreamHolder>,
     vad_state: tauri::State<'_, Arc<Mutex<Vad>>>,
     speech_buf: tauri::State<'_, Arc<Mutex<SpeechBuffer>>>,
+    transcriber: tauri::State<'_, TranscriberHolder>,
     db: tauri::State<'_, Arc<Database>>,
     current_conv: tauri::State<'_, Arc<Mutex<Option<String>>>>,
 ) -> Result<String, String> {
     if audio_state.is_recording() {
         return Err("Already recording".to_string());
+    }
+
+    // Ensure the transcriber is initialized — idempotent, cheap if already loaded.
+    // Without this, transcription silently no-ops when the user never explicitly
+    // calls init_transcriber (e.g., the model file already existed at app start).
+    {
+        let needs_init = transcriber.0.lock().map_err(|e| e.to_string())?.is_none();
+        if needs_init {
+            log::info!("Transcriber not initialized — loading model...");
+            let model_path = transcribe::ensure_model().await?;
+            let t = Transcriber::new(&model_path)?;
+            *transcriber.0.lock().map_err(|e| e.to_string())? = Some(t);
+            log::info!("Transcriber ready");
+        }
     }
 
     // Create a new conversation row for this session
