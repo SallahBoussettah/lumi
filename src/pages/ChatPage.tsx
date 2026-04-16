@@ -5,6 +5,7 @@ import {
   getChatMessages,
   deleteChatSession,
   checkLlmStatus,
+  reindexEmbeddings,
 } from "../lib/tauri";
 import type {
   ChatMessage as ChatMsg,
@@ -40,6 +41,16 @@ export function ChatPage() {
   useEffect(() => {
     checkLlmStatus().then(setLlmReady).catch(() => setLlmReady(false));
     loadSessions();
+    // Backfill embeddings for older items (silent, idempotent — only embeds missing ones)
+    reindexEmbeddings()
+      .then((r) => {
+        if (r.total > 0) {
+          console.log(
+            `Indexed ${r.memories_indexed} memories and ${r.conversations_indexed} conversations for chat retrieval`
+          );
+        }
+      })
+      .catch(() => {});
   }, [loadSessions]);
 
   useEffect(() => {

@@ -454,6 +454,93 @@ struct ChatTurnResult {
     assistant_message_id: String,
 }
 
+/// Backfill embeddings for memories and conversations that don't have one yet.
+/// Returns counts of newly embedded items.
+#[tauri::command]
+async fn reindex_embeddings(
+    embedder: tauri::State<'_, Arc<Embedder>>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    // Find memories without embeddings (scope all borrows so they drop before await)
+    let memories_to_embed: Vec<(String, String)> = {
+        let conn = db.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT m.id, m.content FROM memories m
+             LEFT JOIN embeddings e ON e.entity_type = 'memory' AND e.entity_id = m.id
+             WHERE e.id IS NULL AND m.is_dismissed = 0",
+        ) {
+            Ok(s) => s,
+            Err(e) => return Err(e.to_string()),
+        };
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+
+    let conversations_to_embed: Vec<(String, String, String)> = {
+        let conn = db.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT c.id, c.title, c.overview FROM conversations c
+             LEFT JOIN embeddings e ON e.entity_type = 'conversation' AND e.entity_id = c.id
+             WHERE e.id IS NULL
+               AND c.title IS NOT NULL AND c.overview IS NOT NULL
+               AND c.discarded = 0",
+        ) {
+            Ok(s) => s,
+            Err(e) => return Err(e.to_string()),
+        };
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+
+    let mut mem_count = 0;
+    let mut conv_count = 0;
+
+    let db_arc = db.inner().clone();
+
+    for (id, content) in &memories_to_embed {
+        match rag::store_embedding(&embedder, &db_arc, "memory", id, content).await {
+            Ok(_) => mem_count += 1,
+            Err(e) => log::warn!("Failed to embed memory {}: {}", id, e),
+        }
+    }
+
+    for (id, title, overview) in &conversations_to_embed {
+        let combined = format!("{}\n{}", title, overview);
+        match rag::store_embedding(&embedder, &db_arc, "conversation", id, &combined).await {
+            Ok(_) => conv_count += 1,
+            Err(e) => log::warn!("Failed to embed conversation {}: {}", id, e),
+        }
+    }
+
+    log::info!(
+        "Reindex complete: {} memories, {} conversations",
+        mem_count,
+        conv_count
+    );
+
+    Ok(serde_json::json!({
+        "memories_indexed": mem_count,
+        "conversations_indexed": conv_count,
+        "total": mem_count + conv_count,
+    }))
+}
+
 #[tauri::command]
 async fn chat_send(
     message: String,
@@ -803,6 +890,7 @@ pub fn run() {
             list_chat_sessions,
             get_chat_messages,
             delete_chat_session,
+            reindex_embeddings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -158,6 +158,16 @@ export async function deleteChatSession(sessionId: string): Promise<string> {
   return invoke("delete_chat_session", { sessionId });
 }
 
+export interface ReindexResult {
+  memories_indexed: number;
+  conversations_indexed: number;
+  total: number;
+}
+
+export async function reindexEmbeddings(): Promise<ReindexResult> {
+  return invoke("reindex_embeddings");
+}
+
 export interface Conversation {
   id: string;
   title: string | null;
