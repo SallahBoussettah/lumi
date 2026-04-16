@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   startRecording,
   stopRecording,
+  cancelRecording,
   isRecording as checkRecording,
   initTranscriber,
   transcribePending,
@@ -124,6 +125,17 @@ export function ConversationsPage({ onOpenConversation }: Props) {
       if (transcribeRef.current) clearInterval(transcribeRef.current);
     };
   }, [recording]);
+
+  async function handleCancel() {
+    try {
+      await cancelRecording();
+      setRecording(false);
+      setLiveTranscript([]);
+      await loadData();
+    } catch (e) {
+      console.error("Cancel failed:", e);
+    }
+  }
 
   async function toggleRecording() {
     try {
@@ -325,10 +337,20 @@ export function ConversationsPage({ onOpenConversation }: Props) {
         })
       )}
 
+      {recording && !processing && (
+        <button
+          className="fab fab-cancel"
+          onClick={handleCancel}
+          title="Discard recording"
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+        </button>
+      )}
+
       <button
         className={`fab ${recording ? "is-recording" : ""}`}
         onClick={toggleRecording}
-        title={recording ? "Stop listening" : "Start listening"}
+        title={recording ? "Stop and process" : "Start listening"}
         disabled={processing}
       >
         <span className="material-symbols-outlined">

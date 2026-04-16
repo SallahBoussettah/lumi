@@ -14,6 +14,11 @@ export async function stopRecording(): Promise<string | null> {
   return invoke("stop_recording");
 }
 
+/** Discard the current recording — no transcription, no LLM, deletes the conv */
+export async function cancelRecording(): Promise<void> {
+  return invoke("cancel_recording");
+}
+
 export async function getAudioLevel(): Promise<number> {
   return invoke("get_audio_level");
 }

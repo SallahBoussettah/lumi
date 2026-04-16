@@ -534,6 +534,22 @@ body {
   box-shadow: 0 0 24px oklch(0.74 0.16 155 / 0.45);
 }
 
+.fab.fab-cancel {
+  right: calc(var(--space-6) + 64px);
+  background: var(--surface-card);
+  color: var(--text-3);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-md);
+  width: 44px;
+  height: 44px;
+  bottom: calc(var(--space-6) + 4px);
+}
+
+.fab.fab-cancel:hover {
+  color: var(--semantic-error);
+  border-color: var(--semantic-error);
+}
+
 .fab .material-symbols-outlined {
   font-size: 22px;
 }

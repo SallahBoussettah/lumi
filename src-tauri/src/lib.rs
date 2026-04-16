@@ -108,6 +108,39 @@ async fn start_recording(
     Ok(conv_id)
 }
 
+/// Stop recording WITHOUT triggering processing. Discards the in-progress
+/// conversation, drains the speech buffer, and removes the conversation row.
+#[tauri::command]
+fn cancel_recording(
+    audio_state: tauri::State<'_, Arc<AudioState>>,
+    stream_holder: tauri::State<'_, StreamHolder>,
+    speech_buf: tauri::State<'_, Arc<Mutex<SpeechBuffer>>>,
+    db: tauri::State<'_, Arc<Database>>,
+    current_conv: tauri::State<'_, Arc<Mutex<Option<String>>>>,
+) -> Result<(), String> {
+    // Stop audio capture
+    *stream_holder.0.lock().map_err(|e| e.to_string())? = None;
+    audio_state.set_recording(false);
+    audio_state.set_level(0.0);
+
+    // Drain the speech buffer so leftover segments don't transcribe later
+    {
+        let mut buf = speech_buf.lock().map_err(|e| e.to_string())?;
+        let _ = buf.take_segments();
+        buf.samples.clear();
+    }
+
+    // Delete the in-progress conversation (CASCADE drops transcript_segments)
+    let conv_id = current_conv.lock().map_err(|e| e.to_string())?.take();
+    if let Some(id) = conv_id {
+        let conn = db.conn();
+        let _ = conn.execute("DELETE FROM conversations WHERE id = ?1", [&id]);
+        log::info!("Cancelled and deleted conversation {}", id);
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn stop_recording(
     audio_state: tauri::State<'_, Arc<AudioState>>,
@@ -1037,6 +1070,7 @@ pub fn run() {
             list_audio_devices,
             start_recording,
             stop_recording,
+            cancel_recording,
             get_audio_level,
             is_recording,
             init_transcriber,
