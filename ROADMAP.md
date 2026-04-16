@@ -82,12 +82,17 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 
 ---
 
-## Phase 7: Floating Control Bar
+## Phase 7: Floating Control Bar ✓
 
-- [ ] Secondary Tauri window (always-on-top, frameless)
-- [ ] Text input for quick AI questions
-- [ ] Push-to-talk for voice queries
-- [ ] Global keyboard shortcut to toggle
+- [x] Secondary always-on-top transparent frameless window (label='floating')
+- [x] Compact pill (60×14) → expands on hover to ~480×140
+- [x] Text input for quick AI questions (continues a chat session across messages)
+- [x] Push-to-talk: mic button starts recording, stop auto-sends transcript as question
+- [x] Recent chats list in expanded view — click to resume any past session
+- [x] Open-in-main button — brings up main window and jumps to that chat session
+- [x] System tray toggle (left-click) + context menu (right-click)
+- [ ] Global keyboard shortcut — not feasible on Wayland (Tauri/Wayland protocol limitation). User can bind a custom shortcut via KDE Settings to run the toggle command if they want.
+- [ ] Window dragging — works on X11; Wayland support is intermittent (KWin focus dependency). Acceptable for now.
 
 ---
 
