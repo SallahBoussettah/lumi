@@ -47,9 +47,9 @@
     },
     "trayIcon": {
       "id": "main",
-      "iconPath": "icons/32x32.png",
-      "tooltip": "Omniscient",
-      "iconAsTemplate": true,
+      "iconPath": "icons/128x128.png",
+      "tooltip": "Omniscient — left-click to toggle floating bar",
+      "iconAsTemplate": false,
       "menuOnLeftClick": false
     }
   },

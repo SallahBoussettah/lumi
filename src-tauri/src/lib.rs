@@ -13,6 +13,7 @@ use llm::embed::Embedder;
 use llm::rag::{self, SearchHit};
 use std::sync::{Arc, Mutex};
 use tauri::{
+    menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconEvent},
     Manager,
 };
@@ -1123,10 +1124,45 @@ pub fn run() {
                 )?;
             }
 
-            // Wire up tray click → toggle floating bar (left click)
-            // and main window (right click → for now also focus main, since
-            // we don't have a context menu yet)
+            // Build a tray context menu — most Linux desktops (incl. KDE)
+            // route both clicks through the menu rather than firing raw events.
+            let toggle_bar = MenuItem::with_id(app, "toggle_bar", "Toggle Floating Bar", true, None::<&str>)?;
+            let open_main = MenuItem::with_id(app, "open_main", "Open Main Window", true, None::<&str>)?;
+            let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Omniscient", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&toggle_bar, &open_main, &separator, &quit])?;
+
             if let Some(tray) = app.tray_by_id("main") {
+                tray.set_menu(Some(menu)).ok();
+                tray.set_show_menu_on_left_click(false).ok();
+
+                // Menu item click handler
+                tray.on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "toggle_bar" => {
+                            if let Some(window) = app.get_webview_window("floating") {
+                                let visible = window.is_visible().unwrap_or(false);
+                                if visible {
+                                    let _ = window.hide();
+                                } else {
+                                    let _ = window.show();
+                                }
+                            }
+                        }
+                        "open_main" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                });
+
+                // Direct click handler — works on platforms that fire it (mainly macOS/Windows)
                 tray.on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button,
@@ -1149,7 +1185,7 @@ pub fn run() {
                                     }
                                 }
                             }
-                            MouseButton::Right => {
+                            MouseButton::Middle => {
                                 if let Some(window) = app.get_webview_window("main") {
                                     let _ = window.show();
                                     let _ = window.set_focus();
