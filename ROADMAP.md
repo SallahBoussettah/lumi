@@ -47,13 +47,15 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 
 ---
 
-## Phase 4: AI Chat with Context
+## Phase 4: AI Chat with Context ✓
 
-- [ ] Local embeddings (sentence-transformers or ONNX model)
-- [ ] Vector storage (sqlite-vss or FAISS)
-- [ ] RAG pipeline: query -> embed -> find relevant context -> inject
-- [ ] Chat UI with message history, sessions
-- [ ] Support both local Ollama and external APIs as provider options
+- [x] Local embeddings via Ollama nomic-embed-text (~270MB, 768-dim)
+- [x] Vector storage in SQLite (BLOB column with f32 little-endian packing)
+- [x] RAG pipeline: query -> embed -> brute-force cosine search -> top-K context -> LLM
+- [x] Chat UI with message bubbles, source citations, session history strip
+- [x] Auto-embed memories and conversation overviews on extraction
+- [x] Chat sessions persisted in SQLite, deletable
+- [x] Optimistic message rendering, thinking indicator with animated dots
 
 ---
 
