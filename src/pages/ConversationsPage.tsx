@@ -63,9 +63,9 @@ function getGreeting(): string {
 
 export function ConversationsPage() {
   return (
-    <div className="p-8 lg:p-12 max-w-5xl">
+    <div className="px-10 py-10 max-w-[960px]">
       {/* Header */}
-      <header className="flex justify-between items-start mb-16">
+      <header className="flex justify-between items-start mb-12">
         <div>
           <h1 className="text-[22px] font-light text-text-primary tracking-tight mb-1">
             {getGreeting()}, Salah
@@ -76,40 +76,66 @@ export function ConversationsPage() {
         </div>
 
         {/* Stat Circles */}
-        <div className="relative w-32 h-24 flex items-center justify-center">
-          <StatCircle
-            value={0}
-            label="convos"
-            color="border-brand-purple"
-            position="top-0 left-1/2 -translate-x-1/2"
-          />
-          <StatCircle
-            value={0}
-            label="memories"
-            color="border-brand-teal"
-            position="bottom-0 left-4"
-          />
-          <StatCircle
-            value={0}
-            label="tasks"
-            color="border-brand-amber"
-            position="bottom-0 right-4"
-          />
+        <div className="relative w-36 h-[88px] flex-shrink-0">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center w-11 h-11 rounded-full border-[1.5px] border-brand-purple">
+            <span className="text-[11px] font-bold text-white leading-none">0</span>
+            <span className="text-[7px] uppercase tracking-tighter text-text-muted">convos</span>
+          </div>
+          <div className="absolute bottom-0 left-3 flex flex-col items-center justify-center w-11 h-11 rounded-full border-[1.5px] border-brand-teal">
+            <span className="text-[11px] font-bold text-white leading-none">0</span>
+            <span className="text-[7px] uppercase tracking-tighter text-text-muted">memories</span>
+          </div>
+          <div className="absolute bottom-0 right-3 flex flex-col items-center justify-center w-11 h-11 rounded-full border-[1.5px] border-brand-amber">
+            <span className="text-[11px] font-bold text-white leading-none">0</span>
+            <span className="text-[7px] uppercase tracking-tighter text-text-muted">tasks</span>
+          </div>
         </div>
       </header>
 
       {/* Recent Section */}
       <section>
-        <h2 className="text-[11px] font-bold text-text-ghost tracking-[0.3em] uppercase mb-6 font-[family-name:var(--font-family-label)]">
-          Recent
+        <h2 className="text-[11px] font-bold text-text-ghost tracking-[0.3em] uppercase mb-5">
+          RECENT
         </h2>
 
-        <div className="space-y-0">
+        <div>
           {mockConversations.map((conv, i) => (
             <div key={conv.id}>
-              <ConversationRow conversation={conv} isFirst={i === 0} />
+              <div
+                className={`group flex items-center py-4 px-3 rounded-lg transition-all duration-200 hover:bg-surface-hover cursor-pointer ${
+                  i === 0 ? "bg-surface-active" : ""
+                }`}
+              >
+                <div
+                  className={`w-[3px] h-10 ${accentColors[conv.accent]} rounded-full mr-5 shrink-0`}
+                />
+
+                <div className="flex-1 min-w-0 mr-6">
+                  <h3 className="text-[13px] font-medium text-white mb-1">
+                    {conv.title}
+                  </h3>
+                  <p className="text-[12px] text-text-tertiary truncate">
+                    {conv.overview}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-5 shrink-0">
+                  <div className="flex items-end gap-[2px] h-4">
+                    {conv.sparkline.map((h, j) => (
+                      <div
+                        key={j}
+                        className="w-[2px] bg-brand-purple/30 rounded-full"
+                        style={{ height: `${h * 4}px` }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-[11px] text-text-muted whitespace-nowrap w-12 text-right">
+                    {conv.timeAgo}
+                  </span>
+                </div>
+              </div>
               {i < mockConversations.length - 1 && (
-                <div className="h-px w-full bg-border-subtle" />
+                <div className="h-px mx-3 bg-white/[0.04]" />
               )}
             </div>
           ))}
@@ -117,38 +143,38 @@ export function ConversationsPage() {
       </section>
 
       {/* Bottom Insight Cards */}
-      <div className="mt-16 grid grid-cols-12 gap-6">
-        <div className="col-span-8 h-32 rounded-xl bg-surface-card border border-border-faint p-6 flex items-center justify-between">
+      <div className="mt-12 flex gap-5">
+        <div className="flex-[2] h-28 rounded-xl bg-surface-card border border-border-faint p-5 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full bg-brand-purple/20 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-brand-purple/15 flex items-center justify-center shrink-0">
               <Sparkles className="text-brand-purple" size={18} />
             </div>
             <div>
-              <h4 className="text-white text-xs font-medium">
+              <h4 className="text-white text-[12px] font-medium">
                 Memory Consolidation
               </h4>
-              <p className="text-[10px] text-text-muted uppercase tracking-wider font-[family-name:var(--font-family-label)]">
+              <p className="text-[10px] text-text-muted uppercase tracking-wider mt-0.5">
                 Waiting for data
               </p>
             </div>
           </div>
-          <div className="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div className="w-0 h-full bg-brand-purple rounded-full transition-all duration-500" />
+          <div className="w-28 h-1.5 bg-white/5 rounded-full overflow-hidden shrink-0">
+            <div className="w-0 h-full bg-brand-purple rounded-full" />
           </div>
         </div>
 
-        <div className="col-span-4 h-32 rounded-xl bg-surface-card border border-border-faint p-6">
-          <h4 className="text-white text-xs font-medium mb-3">
+        <div className="flex-1 h-28 rounded-xl bg-surface-card border border-border-faint p-5">
+          <h4 className="text-white text-[12px] font-medium mb-3">
             Today's Focus
           </h4>
-          <div className="flex gap-1 items-end h-14">
-            {[40, 20, 50, 30, 60, 10].map((h, i) => (
+          <div className="flex gap-1 items-end h-12">
+            {[40, 65, 30, 50, 75, 20].map((h, i) => (
               <div
                 key={i}
                 className="flex-1 rounded-sm bg-brand-purple"
                 style={{
                   height: `${h}%`,
-                  opacity: h > 10 ? 0.2 + (h / 100) * 0.4 : 0.05,
+                  opacity: 0.15 + (h / 100) * 0.5,
                 }}
               />
             ))}
@@ -158,77 +184,8 @@ export function ConversationsPage() {
 
       {/* Floating Mic Button */}
       <button className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-brand-purple glow-purple text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95 z-50 cursor-pointer">
-        <Mic size={24} />
+        <Mic size={22} />
       </button>
-    </div>
-  );
-}
-
-function StatCircle({
-  value,
-  label,
-  color,
-  position,
-}: {
-  value: number;
-  label: string;
-  color: string;
-  position: string;
-}) {
-  return (
-    <div
-      className={`absolute ${position} flex flex-col items-center justify-center w-11 h-11 rounded-full border-[1.5px] ${color}`}
-    >
-      <span className="text-[11px] font-bold text-white leading-none">
-        {value}
-      </span>
-      <span className="text-[7px] uppercase tracking-tighter text-text-muted">
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function ConversationRow({
-  conversation,
-  isFirst,
-}: {
-  conversation: (typeof mockConversations)[0];
-  isFirst: boolean;
-}) {
-  return (
-    <div
-      className={`group flex items-center py-5 px-4 -mx-4 rounded-lg transition-all duration-200 hover:bg-surface-hover cursor-pointer ${
-        isFirst ? "bg-surface-active" : ""
-      }`}
-    >
-      <div
-        className={`w-0.5 h-10 ${accentColors[conversation.accent]} rounded-full mr-6 shrink-0`}
-      />
-
-      <div className="flex-1 min-w-0 pr-8">
-        <h3 className="text-sm font-medium text-white mb-0.5">
-          {conversation.title}
-        </h3>
-        <p className="text-xs text-text-tertiary truncate">
-          {conversation.overview}
-        </p>
-      </div>
-
-      <div className="flex items-end gap-6 shrink-0">
-        <div className="flex items-end gap-0.5 h-4 mb-1">
-          {conversation.sparkline.map((h, i) => (
-            <div
-              key={i}
-              className="w-[2px] bg-brand-purple opacity-30 rounded-full"
-              style={{ height: `${h * 4}px` }}
-            />
-          ))}
-        </div>
-        <span className="text-[11px] text-text-muted whitespace-nowrap mb-1">
-          {conversation.timeAgo}
-        </span>
-      </div>
     </div>
   );
 }

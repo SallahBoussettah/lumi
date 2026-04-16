@@ -35,8 +35,7 @@ export function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       <Sidebar activePage={activePage} onNavigate={setActivePage} />
-      <div className="fixed left-16 top-0 bottom-0 w-px vertical-divider z-40" />
-      <main className="ml-16 flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden">
         <ActivePage />
       </main>
     </div>
