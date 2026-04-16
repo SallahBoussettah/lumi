@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getMemories } from "../lib/tauri";
+import { getMemories, dismissMemory } from "../lib/tauri";
 import type { MemoryItem } from "../lib/tauri";
 
 const FILTERS = [
@@ -21,6 +21,16 @@ export function MemoriesPage({ onOpenMemory }: Props) {
       .then((data) => setMemories(data as unknown as MemoryItem[]))
       .catch(() => {});
   }, []);
+
+  async function handleDismiss(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    try {
+      await dismissMemory(id);
+      setMemories((prev) => prev.filter((m) => m.id !== id));
+    } catch {
+      /* ignore */
+    }
+  }
 
   const filtered =
     filter === "all" ? memories : memories.filter((m) => m.category === filter);
@@ -77,8 +87,18 @@ export function MemoriesPage({ onOpenMemory }: Props) {
                   {mem.content}
                 </div>
               </div>
-              <div className="conv-meta">
+              <div
+                className="conv-meta"
+                style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+              >
                 <span className="conv-tag">{mem.category}</span>
+                <button
+                  className="row-action"
+                  onClick={(e) => handleDismiss(mem.id, e)}
+                  title="Dismiss memory"
+                >
+                  <span className="material-symbols-outlined">delete</span>
+                </button>
               </div>
             </div>
           ))}

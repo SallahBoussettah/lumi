@@ -845,6 +845,26 @@ fn delete_memory(
 }
 
 #[tauri::command]
+fn delete_action_item(
+    id: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<String, String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM action_items WHERE id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    Ok("Deleted".to_string())
+}
+
+#[tauri::command]
+fn clear_completed_tasks(db: tauri::State<'_, Arc<Database>>) -> Result<usize, String> {
+    let conn = db.conn();
+    let count = conn
+        .execute("DELETE FROM action_items WHERE completed = 1", [])
+        .map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+#[tauri::command]
 fn toggle_action_item(
     id: String,
     completed: bool,
@@ -1019,6 +1039,8 @@ pub fn run() {
             get_memories,
             get_action_items,
             toggle_action_item,
+            delete_action_item,
+            clear_completed_tasks,
             chat_send,
             list_chat_sessions,
             get_chat_messages,

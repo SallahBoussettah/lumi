@@ -248,3 +248,11 @@ export async function getActionItems(): Promise<ActionItemData[]> {
 export async function toggleActionItem(id: string, completed: boolean): Promise<string> {
   return invoke("toggle_action_item", { id, completed });
 }
+
+export async function deleteActionItem(id: string): Promise<string> {
+  return invoke("delete_action_item", { id });
+}
+
+export async function clearCompletedTasks(): Promise<number> {
+  return invoke("clear_completed_tasks");
+}

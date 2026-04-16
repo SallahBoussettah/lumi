@@ -334,6 +334,35 @@ body {
   background: var(--surface-hover);
 }
 
+.row-action {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-control);
+  background: transparent;
+  border: none;
+  color: var(--text-4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: all var(--dur-quick) var(--ease-out);
+}
+
+.conv-row:hover .row-action {
+  opacity: 1;
+}
+
+.row-action:hover {
+  background: var(--surface-pressed);
+  color: var(--semantic-error);
+}
+
+.row-action .material-symbols-outlined {
+  font-size: 16px;
+}
+
 .conv-row + .conv-row {
   border-top: 1px solid var(--border-faint);
 }
