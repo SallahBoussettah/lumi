@@ -121,13 +121,32 @@ pub fn format_context(hits: &[SearchHit]) -> String {
     out
 }
 
-const CHAT_SYSTEM_PROMPT: &str = r#"You are Omniscient, the user's personal AI assistant. You have access to their captured conversations, extracted memories, and notes. When answering, ground your response in the provided context. If the context doesn't contain the answer, say so honestly — don't fabricate details.
+const CHAT_SYSTEM_PROMPT_TEMPLATE: &str = r#"You are Omniscient, the user's personal AI assistant. You have access to their captured conversations, extracted memories, and notes. When answering, ground your response in the provided context. If the context doesn't contain the answer, say so honestly — don't fabricate details.
 
-You have tools to actually create, update, and complete tasks, and to save memories. WHEN THE USER ASKS YOU TO DO SOMETHING (add a task, mark something done, save a note, list tasks), USE THE TOOLS. Do not just say you'll do it — actually call the function. After the tool runs, briefly confirm what you did in natural language.
+CURRENT DATE: {today} ({weekday})
+The user's local date matters when computing things like "tomorrow", "next Monday", or "this Friday". Use this date as your reference, NOT your training cutoff. When you call create_task with a due_at, use the year {year}.
 
-Be concise and conversational. Refer to specific memories or conversations naturally (e.g., "From your conversation about X..."). Use first person when speaking as the assistant.
+You have tools to actually create, update, and complete tasks, and to save memories. WHEN THE USER ASKS YOU TO DO SOMETHING (add a task, mark something done, save a note, list tasks), USE THE TOOLS. Do not just say you'll do it — actually call the function. After the tool runs, briefly confirm what you did in one short sentence.
+
+IMPORTANT — avoid duplicates:
+- Before calling create_memory, check the context above. If a similar memory already exists, do NOT create it again.
+- Before calling create_task, check the context. If a near-identical task already exists, just acknowledge it.
+
+Style:
+- Be concise. One short sentence per turn unless detail is requested.
+- Don't ask "is there anything else?" — let the user drive.
+- Refer to specific memories or conversations naturally (e.g., "From your conversation about X...").
+- Use first person ("I") when speaking as the assistant.
 
 For general knowledge, math, code, or things unrelated to the user's captured data, answer normally without using tools."#;
+
+fn current_system_prompt() -> String {
+    let now = chrono::Local::now();
+    CHAT_SYSTEM_PROMPT_TEMPLATE
+        .replace("{today}", &now.format("%Y-%m-%d").to_string())
+        .replace("{weekday}", &now.format("%A").to_string())
+        .replace("{year}", &now.format("%Y").to_string())
+}
 
 /// Run a RAG-augmented chat turn with tool-calling support.
 /// Loops up to 5 times executing tool calls and feeding results back until
@@ -145,7 +164,8 @@ pub async fn chat_with_context(
     let mut messages: Vec<ChatMessage> = Vec::new();
     messages.push(ChatMessage::system(format!(
         "{}\n\n---\n\n{}",
-        CHAT_SYSTEM_PROMPT, context
+        current_system_prompt(),
+        context
     )));
     messages.extend_from_slice(history);
     messages.push(ChatMessage::user(user_message));

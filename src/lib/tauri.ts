@@ -200,6 +200,7 @@ export interface ActionItemData {
   description: string;
   completed: boolean;
   priority: string;
+  due_at: string | null;
   conversation_id: string | null;
   created_at: string;
 }

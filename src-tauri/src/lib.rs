@@ -276,7 +276,7 @@ fn get_action_items(db: tauri::State<'_, Arc<Database>>) -> Result<serde_json::V
     let conn = db.conn();
     let mut stmt = conn
         .prepare(
-            "SELECT id, description, completed, priority, conversation_id, created_at
+            "SELECT id, description, completed, priority, due_at, conversation_id, created_at
              FROM action_items ORDER BY completed ASC, created_at DESC LIMIT 100",
         )
         .map_err(|e| e.to_string())?;
@@ -288,8 +288,9 @@ fn get_action_items(db: tauri::State<'_, Arc<Database>>) -> Result<serde_json::V
                 "description": row.get::<_, String>(1)?,
                 "completed": row.get::<_, bool>(2)?,
                 "priority": row.get::<_, String>(3)?,
-                "conversation_id": row.get::<_, Option<String>>(4)?,
-                "created_at": row.get::<_, String>(5)?,
+                "due_at": row.get::<_, Option<String>>(4)?,
+                "conversation_id": row.get::<_, Option<String>>(5)?,
+                "created_at": row.get::<_, String>(6)?,
             }))
         })
         .map_err(|e| e.to_string())?

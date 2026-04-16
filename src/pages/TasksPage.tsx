@@ -79,6 +79,25 @@ export function TasksPage() {
   );
 }
 
+function formatDueDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayMs = 86400000;
+  const dayDiff = Math.round((d.getTime() - today.getTime()) / dayMs);
+
+  if (dayDiff === 0) return "today";
+  if (dayDiff === 1) return "tomorrow";
+  if (dayDiff === -1) return "yesterday";
+  if (dayDiff > 1 && dayDiff <= 7) {
+    return d.toLocaleDateString(undefined, { weekday: "long" });
+  }
+  if (dayDiff < 0) return "overdue";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function TaskRow({
   task,
   onToggle,
@@ -86,16 +105,23 @@ function TaskRow({
   task: ActionItemData;
   onToggle: (id: string, completed: boolean) => void;
 }) {
+  const due = formatDueDate(task.due_at);
+  const isOverdue = due === "overdue" || due === "yesterday";
+  const isDueToday = due === "today";
+
   return (
     <div
       className="conv-row"
       onClick={() => onToggle(task.id, task.completed)}
       style={{ alignItems: "center" }}
     >
-      <div className="conv-icon" style={{
-        background: task.completed ? "transparent" : "var(--accent-faint)",
-        color: task.completed ? "var(--semantic-active)" : "var(--accent)",
-      }}>
+      <div
+        className="conv-icon"
+        style={{
+          background: task.completed ? "transparent" : "var(--accent-faint)",
+          color: task.completed ? "var(--semantic-active)" : "var(--accent)",
+        }}
+      >
         <span className="material-symbols-outlined">
           {task.completed ? "check_circle" : "radio_button_unchecked"}
         </span>
@@ -111,6 +137,24 @@ function TaskRow({
         >
           {task.description}
         </div>
+        {due && !task.completed && (
+          <div
+            className="conv-overview"
+            style={{
+              color: isOverdue
+                ? "var(--semantic-error)"
+                : isDueToday
+                  ? "var(--accent)"
+                  : "var(--text-3)",
+              marginTop: 2,
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 12, verticalAlign: "middle", marginRight: 4 }}>
+              schedule
+            </span>
+            {due}
+          </div>
+        )}
       </div>
       <div className="conv-meta">
         <span className={`priority priority-${task.priority}`}>{task.priority}</span>

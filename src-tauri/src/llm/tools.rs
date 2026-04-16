@@ -145,6 +145,25 @@ async fn create_task(args: &Value, db: &Arc<Database>) -> Result<String, String>
         .unwrap_or("medium");
     let due_at = args.get("due_at").and_then(Value::as_str);
 
+    // Dedup: if a pending task already has near-identical description, skip
+    let pattern = format!("%{}%", description.to_lowercase());
+    let existing: Option<String> = {
+        let conn = db.conn();
+        conn.query_row(
+            "SELECT description FROM action_items
+             WHERE completed = 0 AND LOWER(description) LIKE ?1 LIMIT 1",
+            [&pattern],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+    };
+    if let Some(existing_desc) = existing {
+        return Ok(format!(
+            "A similar task already exists: \"{}\" (no duplicate created)",
+            existing_desc
+        ));
+    }
+
     let id = uuid::Uuid::new_v4().to_string();
     let conn = db.conn();
     conn.execute(
@@ -155,8 +174,7 @@ async fn create_task(args: &Value, db: &Arc<Database>) -> Result<String, String>
     .map_err(|e| format!("DB insert failed: {}", e))?;
 
     Ok(format!(
-        "Task created (id={}): \"{}\" [{}{}]",
-        id,
+        "Task created: \"{}\" [{}{}]",
         description,
         priority,
         due_at.map(|d| format!(", due {}", d)).unwrap_or_default()
@@ -315,6 +333,19 @@ async fn create_memory(
         .and_then(Value::as_str)
         .unwrap_or("system");
 
+    // Dedup: if a memory with similar content (>85% cosine) already exists, skip
+    let existing_hits = rag::search(embedder, db, content, 1).await.ok();
+    if let Some(hits) = existing_hits {
+        if let Some(top) = hits.first() {
+            if top.entity_type == "memory" && top.score > 0.85 {
+                return Ok(format!(
+                    "Already remembered: \"{}\" (no duplicate created)",
+                    top.text.trim()
+                ));
+            }
+        }
+    }
+
     let id = uuid::Uuid::new_v4().to_string();
     {
         let conn = db.conn();
@@ -325,7 +356,6 @@ async fn create_memory(
         .map_err(|e| format!("DB insert failed: {}", e))?;
     }
 
-    // Embed it for future RAG retrieval (best-effort)
     let _ = rag::store_embedding(embedder, db, "memory", &id, content).await;
 
     Ok(format!("Memory saved: \"{}\"", content))
