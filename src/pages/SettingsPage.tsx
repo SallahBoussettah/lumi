@@ -38,6 +38,17 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+const EMBEDDING_MODEL_PATTERNS = [
+  /embed/i,
+  /^bge-/i,
+  /^mxbai/i,
+  /^all-minilm/i,
+];
+
+function isEmbeddingModel(name: string): boolean {
+  return EMBEDDING_MODEL_PATTERNS.some((re) => re.test(name));
+}
+
 export function SettingsPage() {
   const [llmReachable, setLlmReachable] = useState<boolean | null>(null);
   const [activeModel, setActiveModelState] = useState<string>("");
@@ -101,50 +112,65 @@ export function SettingsPage() {
             </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {models.map((m) => {
-                const isActive = m.name === activeModel;
-                return (
-                  <button
-                    key={m.name}
-                    onClick={() => handleSelectModel(m.name)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "10px 14px",
-                      borderRadius: "var(--r-control)",
-                      border: `1px solid ${isActive ? "var(--accent)" : "var(--border-faint)"}`,
-                      background: isActive ? "var(--accent-soft)" : "var(--surface-card)",
-                      color: isActive ? "var(--accent)" : "var(--text-2)",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: "var(--text-sm)",
-                      transition: "all var(--dur-quick) var(--ease-out)",
-                      textAlign: "left",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 500 }}>{m.name}</div>
-                      {m.details && (
-                        <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
-                          {m.details.parameter_size} · {m.details.quantization_level}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <span style={{ fontSize: 11, opacity: 0.7 }}>{formatSize(m.size)}</span>
-                      {isActive && (
-                        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
-                          check_circle
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+              {models
+                .filter((m) => !isEmbeddingModel(m.name))
+                .map((m) => {
+                  const isActive = m.name === activeModel;
+                  return (
+                    <button
+                      key={m.name}
+                      onClick={() => handleSelectModel(m.name)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 14px",
+                        borderRadius: "var(--r-control)",
+                        border: `1px solid ${isActive ? "var(--accent)" : "var(--border-faint)"}`,
+                        background: isActive ? "var(--accent-soft)" : "var(--surface-card)",
+                        color: isActive ? "var(--accent)" : "var(--text-2)",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontSize: "var(--text-sm)",
+                        transition: "all var(--dur-quick) var(--ease-out)",
+                        textAlign: "left",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{m.name}</div>
+                        {m.details && (
+                          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
+                            {m.details.parameter_size} · {m.details.quantization_level}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{ fontSize: 11, opacity: 0.7 }}>{formatSize(m.size)}</span>
+                        {isActive && (
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                            check_circle
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
             </div>
           )}
         </div>
+
+        {/* Embedding model — informational, not selectable */}
+        {models.some((m) => isEmbeddingModel(m.name)) && (
+          <Row
+            label="Embedding model"
+            value={
+              <span className="conv-time">
+                {models.find((m) => isEmbeddingModel(m.name))?.name || "—"}
+              </span>
+            }
+            hint="Used for chat retrieval (RAG). Converts text to vectors so I can search your memories by meaning, not just keywords. Not a chat model — runs separately."
+          />
+        )}
       </section>
 
       <section className="date-section">
