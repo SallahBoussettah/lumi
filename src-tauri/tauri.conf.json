@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Omniscient",
         "width": 1100,
         "height": 720,
@@ -20,6 +21,25 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": true
+      },
+      {
+        "label": "floating",
+        "url": "index.html?window=floating",
+        "title": "Omniscient — Quick Bar",
+        "width": 320,
+        "height": 56,
+        "minWidth": 60,
+        "minHeight": 14,
+        "x": 100,
+        "y": 60,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "visible": false,
+        "shadow": false
       }
     ],
     "security": {
@@ -29,7 +49,8 @@
       "id": "main",
       "iconPath": "icons/32x32.png",
       "tooltip": "Omniscient",
-      "iconAsTemplate": true
+      "iconAsTemplate": true,
+      "menuOnLeftClick": false
     }
   },
   "bundle": {

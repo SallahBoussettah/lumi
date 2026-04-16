@@ -19,6 +19,28 @@ export async function cancelRecording(): Promise<void> {
   return invoke("cancel_recording");
 }
 
+// ===== FLOATING BAR =====
+
+export async function toggleFloatingBar(): Promise<boolean> {
+  return invoke("toggle_floating_bar");
+}
+
+export async function showFloatingBar(): Promise<void> {
+  return invoke("show_floating_bar");
+}
+
+export async function hideFloatingBar(): Promise<void> {
+  return invoke("hide_floating_bar");
+}
+
+export async function floatingBarResize(width: number, height: number): Promise<void> {
+  return invoke("floating_bar_resize", { width, height });
+}
+
+export async function showMainWindow(): Promise<void> {
+  return invoke("show_main_window");
+}
+
 export async function getAudioLevel(): Promise<number> {
   return invoke("get_audio_level");
 }

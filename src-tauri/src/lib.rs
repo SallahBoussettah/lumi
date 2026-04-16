@@ -12,6 +12,10 @@ use llm::client::{ChatMessage, LlmClient};
 use llm::embed::Embedder;
 use llm::rag::{self, SearchHit};
 use std::sync::{Arc, Mutex};
+use tauri::{
+    tray::{MouseButton, MouseButtonState, TrayIconEvent},
+    Manager,
+};
 
 /// Wrapper to make cpal::Stream usable in Tauri state (Send + Sync)
 struct StreamHolder(Mutex<Option<Stream>>);
@@ -1013,6 +1017,70 @@ async fn process_conversation_cmd(
     Ok(format!("Processed conversation {}", conversation_id))
 }
 
+// =====================================================
+// FLOATING BAR
+// =====================================================
+
+#[tauri::command]
+fn toggle_floating_bar(app: tauri::AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("floating")
+        .ok_or("Floating window not found")?;
+
+    let visible = window.is_visible().map_err(|e| e.to_string())?;
+    if visible {
+        window.hide().map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        window.show().map_err(|e| e.to_string())?;
+        // Note: focus is intentionally not called — we want it always-on-top but non-stealing
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn show_floating_bar(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("floating")
+        .ok_or("Floating window not found")?;
+    window.show().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_floating_bar(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("floating")
+        .ok_or("Floating window not found")?;
+    window.hide().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn floating_bar_resize(
+    app: tauri::AppHandle,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("floating")
+        .ok_or("Floating window not found")?;
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Main window not found")?;
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_path = db::db_path();
@@ -1054,6 +1122,45 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // Wire up tray click → toggle floating bar (left click)
+            // and main window (right click → for now also focus main, since
+            // we don't have a context menu yet)
+            if let Some(tray) = app.tray_by_id("main") {
+                tray.on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button,
+                        button_state,
+                        ..
+                    } = event
+                    {
+                        if button_state != MouseButtonState::Up {
+                            return;
+                        }
+                        let app = tray.app_handle();
+                        match button {
+                            MouseButton::Left => {
+                                if let Some(window) = app.get_webview_window("floating") {
+                                    let visible = window.is_visible().unwrap_or(false);
+                                    if visible {
+                                        let _ = window.hide();
+                                    } else {
+                                        let _ = window.show();
+                                    }
+                                }
+                            }
+                            MouseButton::Right => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .manage(database)
@@ -1090,6 +1197,11 @@ pub fn run() {
             toggle_action_item,
             delete_action_item,
             clear_completed_tasks,
+            toggle_floating_bar,
+            show_floating_bar,
+            hide_floating_bar,
+            floating_bar_resize,
+            show_main_window,
             chat_send,
             list_chat_sessions,
             get_chat_messages,
