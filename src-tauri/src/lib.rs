@@ -1,6 +1,8 @@
 mod audio;
 mod db;
 
+use audio::capture::SpeechBuffer;
+use audio::vad::Vad;
 use audio::AudioState;
 use cpal::Stream;
 use db::Database;
@@ -8,9 +10,6 @@ use std::sync::{Arc, Mutex};
 
 /// Wrapper to make cpal::Stream usable in Tauri state (Send + Sync)
 struct StreamHolder(Mutex<Option<Stream>>);
-
-// SAFETY: cpal::Stream on Linux (ALSA/PipeWire) is thread-safe in practice.
-// The Stream is only accessed behind a Mutex.
 unsafe impl Send for StreamHolder {}
 unsafe impl Sync for StreamHolder {}
 
@@ -46,12 +45,18 @@ fn list_audio_devices() -> Vec<String> {
 fn start_recording(
     audio_state: tauri::State<'_, Arc<AudioState>>,
     stream_holder: tauri::State<'_, StreamHolder>,
+    vad_state: tauri::State<'_, Arc<Mutex<Vad>>>,
+    speech_buf: tauri::State<'_, Arc<Mutex<SpeechBuffer>>>,
 ) -> Result<String, String> {
     if audio_state.is_recording() {
         return Err("Already recording".to_string());
     }
 
-    let stream = audio::capture::start_capture(audio_state.inner().clone())?;
+    let stream = audio::capture::start_capture(
+        audio_state.inner().clone(),
+        vad_state.inner().clone(),
+        speech_buf.inner().clone(),
+    )?;
 
     let mut holder = stream_holder.0.lock().map_err(|e| e.to_string())?;
     *holder = Some(stream);
@@ -82,12 +87,34 @@ fn is_recording(audio_state: tauri::State<'_, Arc<AudioState>>) -> bool {
     audio_state.is_recording()
 }
 
+#[tauri::command]
+fn get_speech_segments(
+    speech_buf: tauri::State<'_, Arc<Mutex<SpeechBuffer>>>,
+) -> Result<usize, String> {
+    let mut buf = speech_buf.lock().map_err(|e| e.to_string())?;
+    let segments = buf.take_segments();
+    let count = segments.len();
+    // For now just log them — transcription will process them later
+    for (i, seg) in segments.iter().enumerate() {
+        let duration = seg.len() as f32 / 16000.0;
+        log::info!("Segment {}: {:.1}s", i, duration);
+    }
+    Ok(count)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_path = db::db_path();
     let database = Arc::new(Database::open(&db_path).expect("failed to open database"));
     let audio_state = Arc::new(AudioState::new());
     let stream_holder = StreamHolder(Mutex::new(None));
+
+    // Initialize VAD
+    let vad = Arc::new(Mutex::new(
+        Vad::new().expect("failed to initialize Silero VAD"),
+    ));
+
+    let speech_buffer = Arc::new(Mutex::new(SpeechBuffer::new()));
 
     tauri::Builder::default()
         .setup(|app| {
@@ -103,6 +130,8 @@ pub fn run() {
         .manage(database)
         .manage(audio_state)
         .manage(stream_holder)
+        .manage(vad)
+        .manage(speech_buffer)
         .invoke_handler(tauri::generate_handler![
             get_db_stats,
             list_audio_devices,
@@ -110,6 +139,7 @@ pub fn run() {
             stop_recording,
             get_audio_level,
             is_recording,
+            get_speech_segments,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
