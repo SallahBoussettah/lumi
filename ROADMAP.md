@@ -59,6 +59,23 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 
 ---
 
+## Phase 4.5: Voice Mode (Jarvis-style hands-free chat) ✓
+
+- [x] Streaming chat — LLM tokens stream live to the UI via Tauri events
+- [x] Kokoro-82M TTS sidecar (PyTorch, FastAPI) with real per-word timestamps from the model
+- [x] Sentence batcher splits the streaming response into sentences as they complete
+- [x] TtsPlayer chains AudioBufferSourceNodes for gapless sequential playback
+- [x] Parallel synthesis with serialized enqueue — sentences play in the order they were emitted even when HTTP responses arrive out of order
+- [x] Karaoke text rendering — full response shown dim, words brighten as Kokoro speaks them, accurate to comma/period pauses
+- [x] Voice mode overlay with animated orb (state-driven: idle / listening / thinking / speaking / error)
+- [x] VAD-driven auto-stop (1.5s silence after speech)
+- [x] Live partial transcription via whisper on the in-progress speech buffer (~1.2s cadence) so the user sees their words appear as they speak
+- [x] Auto-loop: after speaking finishes, mic re-arms automatically
+- [x] Tap-to-interrupt: tap orb to stop speech and start listening
+- [x] `end_voice_session` tool — model can close voice mode when the user wraps up ("thanks, that's all"), pairs with a brief spoken farewell
+
+---
+
 ## Phase 5: Screen Capture + OCR + Rewind
 
 - [ ] PipeWire XDG Desktop Portal screen capture
@@ -138,4 +155,5 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 | VAD | Silero ONNX (voice_activity_detector crate) |
 | OCR | Tesseract (Phase 5) |
 | LLM | Ollama (qwen2.5:7b/14b, hot-swappable) |
-| Embeddings | sentence-transformers / ONNX (Phase 4) |
+| Embeddings | Ollama nomic-embed-text |
+| TTS | Kokoro-82M (PyTorch + misaki) via FastAPI sidecar |

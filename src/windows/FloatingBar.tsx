@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import {
@@ -10,7 +11,7 @@ import {
   transcribePending,
   initTranscriber,
   hasWhisperModel,
-  chatSend,
+  chatSendStream,
   hideFloatingBar,
   floatingBarResize,
   showMainWindowWithChat,
@@ -20,6 +21,7 @@ import {
 import type {
   TranscriptSegment,
   ChatSession,
+  ChatTokenEvent,
   SearchHit,
 } from "../lib/tauri";
 
@@ -202,9 +204,26 @@ export function FloatingBar() {
 
   async function sendText(text: string) {
     setThinking(true);
+    setAnswer(null);
+    setSources([]);
+
+    let switched = false;
+    const unlisten = await listen<ChatTokenEvent>("chat-token", (e) => {
+      const delta = e.payload.delta;
+      if (!delta) return;
+      if (!switched) {
+        switched = true;
+        setThinking(false);
+        setMode("answer");
+      }
+      setAnswer((prev) => (prev ?? "") + delta);
+    });
+
     try {
-      const result = await chatSend(text, sessionId);
+      const result = await chatSendStream(text, sessionId);
       setSessionId(result.session_id);
+      // Final answer (use server's authoritative text — handles cases where
+      // the stream missed any tokens or included tool-call chatter).
       setAnswer(result.answer);
       setSources(result.sources || []);
       setMode("answer");
@@ -213,8 +232,10 @@ export function FloatingBar() {
       setAnswer(`Error: ${e}`);
       setSources([]);
       setMode("answer");
+    } finally {
+      unlisten();
+      setThinking(false);
     }
-    setThinking(false);
   }
 
   async function handleSend() {

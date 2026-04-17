@@ -164,6 +164,22 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 }),
             },
         },
+        ToolDef {
+            kind: "function".into(),
+            function: ToolFunction {
+                name: "end_voice_session".into(),
+                description: "Call this ONLY when the user clearly signals they're done with the voice conversation — phrases like 'thanks, that's all', 'goodbye', 'I'm done', 'that's everything', 'talk to you later', etc. Always pair this tool call with a brief spoken farewell in your text response (e.g. 'Sounds good, talk soon.'). Do NOT call this just because a question was answered — only when the USER says they're wrapping up. Has no effect outside voice mode.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "farewell": {
+                            "type": "string",
+                            "description": "Optional brief one-liner farewell, e.g. 'Talk to you soon.' This is for the tool log only — your actual spoken farewell should be in your normal text response."
+                        }
+                    }
+                }),
+            },
+        },
     ]
 }
 
@@ -187,6 +203,15 @@ pub async fn execute_tool(
         "update_memory" => update_memory_tool(&args, db, embedder).await,
         "delete_memory" => delete_memory_tool(&args, db).await,
         "list_memories" => list_memories_tool(&args, db).await,
+        "end_voice_session" => {
+            // Pure signal — the frontend reads the tool name out of the
+            // turn result and closes voice mode after the farewell finishes.
+            let farewell = args
+                .get("farewell")
+                .and_then(Value::as_str)
+                .unwrap_or("Closing voice mode.");
+            Ok(format!("OK ({})", farewell))
+        }
         _ => Err(format!("Unknown tool: {}", name)),
     }
 }

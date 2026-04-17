@@ -11,6 +11,7 @@ Omniscient is a desktop companion that records and transcribes what you say, ext
 - **Remembers.** Memories and conversation summaries are embedded into a local vector store for semantic search.
 - **Answers.** Chat with an AI that has full context of your captured data. Ask things like "what did Marcus tell me?" or "what do I need to do tomorrow?"
 - **Acts.** The chat assistant has tools to actually create, update, complete tasks and edit memories — not just talk about them.
+- **Speaks.** Hands-free voice mode (Jarvis-style): mic button → talk → pause → AI streams its reply through Kokoro TTS with karaoke-style word highlighting. Say "thanks, that's all" to close.
 
 ## Status
 
@@ -22,6 +23,7 @@ Early but functional. The core loop works end-to-end: record → transcribe → 
 | 2. Audio capture, VAD, GPU-accelerated whisper | ✅ |
 | 3. LLM pipeline (structure, action items, memories) | ✅ |
 | 4. RAG chat with tool calling (create/edit/delete tasks and memories) | ✅ |
+| 4.5. Voice mode — streaming chat, Kokoro TTS, karaoke highlight, end-on-intent | ✅ |
 | 5. Screen capture + OCR + rewind | planned |
 | 6. Proactive assistants (focus tracking, distraction nudges) | planned |
 | 7. Always-on-top floating bar | planned |
@@ -41,6 +43,7 @@ Early but functional. The core loop works end-to-end: record → transcribe → 
 | Speech-to-text | `whisper-rs` 0.16 with `hipblas` feature → ROCm GPU |
 | LLM | Ollama (qwen2.5:7b/14b, hot-swappable) |
 | Embeddings | `nomic-embed-text` via Ollama |
+| Text-to-speech | Kokoro-82M (PyTorch) via FastAPI sidecar — real per-word timings |
 | Vector search | brute-force cosine in Rust over SQLite-stored f32 BLOBs |
 | Icons + fonts | Material Symbols, Geist + Newsreader |
 
@@ -51,6 +54,7 @@ Designed for Linux with AMD GPUs (tested on RDNA 4 / RX 9070 XT). Should work on
 - **Linux** with PipeWire or PulseAudio
 - **Rust** 1.77+
 - **Node.js** 20+ and **pnpm**
+- **Python** 3.11/3.12 + [`uv`](https://github.com/astral-sh/uv) — for the Kokoro TTS sidecar
 - **Ollama** running locally (`systemctl start ollama`)
 - For GPU transcription: **ROCm** with `hipBLAS` (or rebuild with `cuda` feature for NVIDIA)
 - Tauri build deps: `webkit2gtk4.1-devel`, `gtk3-devel`, `libappindicator-gtk3-devel`
@@ -83,6 +87,7 @@ The first time you click the mic button, the Whisper model (Large-v3-Turbo, ~1.5
 2. **Stop** — the app processes the transcript with the LLM (structure → action items → memories) and embeds everything for chat.
 3. **Browse** — go through Conversations, Memories, and Tasks pages. Click any item for details, edit, or delete.
 4. **Chat** — ask questions in natural language. The assistant retrieves relevant context and can call tools to actually update your data ("change Marcus to Mark in that book memory" works).
+5. **Voice mode** — click the waveform icon next to the chat input. Speak, pause, and the AI replies aloud while highlighting words as they're spoken. End the conversation by saying anything wrap-up like "thanks, talk later" — the model will deliver a brief farewell and the overlay closes.
 
 ## Configuration
 

@@ -781,6 +781,31 @@ body {
   font-weight: 500;
 }
 
+.chat-speak-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.chat-speak-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+  border-color: var(--border-1);
+}
+.chat-speak-btn.active {
+  background: rgba(255, 159, 67, 0.12);
+  color: var(--accent);
+  border-color: rgba(255, 159, 67, 0.35);
+}
+
 .chat-input-bar {
   flex-shrink: 0;
   padding: var(--space-3) 0 var(--space-6);
@@ -1368,3 +1393,198 @@ html.floating-host #root {
 
 .fb-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
 .fb-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* ===========================================================
+ * Voice Mode — fullscreen overlay
+ * =========================================================== */
+
+.chat-voice-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--text-3);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--dur-quick) var(--ease-out);
+}
+.chat-voice-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: rgba(255, 159, 67, 0.45);
+  background: rgba(255, 159, 67, 0.06);
+}
+.chat-voice-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.voice-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  background:
+    radial-gradient(ellipse at center, rgba(255, 159, 67, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse at top, rgba(80, 70, 60, 0.18) 0%, transparent 50%),
+    var(--surface-base);
+  color: var(--text-1);
+  animation: voice-mode-enter 240ms ease-out;
+}
+
+@keyframes voice-mode-enter {
+  from { opacity: 0; backdrop-filter: blur(0px); }
+  to   { opacity: 1; backdrop-filter: blur(8px); }
+}
+
+.voice-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, color 120ms ease;
+  z-index: 2;
+}
+.voice-close:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.voice-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 60px 32px 16px;
+  overflow: hidden;
+}
+
+/* The orb — animated breathing ball reflecting state */
+.voice-orb {
+  --orb-size: 180px;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  border: none;
+  cursor: default;
+  position: relative;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 200, 130, 0.55), transparent 55%),
+    radial-gradient(circle at 70% 70%, rgba(255, 100, 60, 0.45), transparent 60%),
+    radial-gradient(circle at center, var(--accent) 0%, #b8521b 80%);
+  box-shadow:
+    0 0 60px rgba(255, 159, 67, 0.35),
+    0 0 120px rgba(255, 159, 67, 0.18),
+    inset 0 0 40px rgba(255, 220, 180, 0.18);
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 400ms ease;
+}
+
+.voice-orb::before {
+  content: "";
+  position: absolute;
+  inset: -16px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 159, 67, 0.18) 0%, transparent 70%);
+  pointer-events: none;
+  animation: voice-orb-pulse 3s ease-in-out infinite;
+}
+
+@keyframes voice-orb-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.05); }
+}
+
+.voice-orb--idle    { filter: saturate(0.7) brightness(0.85); }
+.voice-orb--listening { animation: voice-orb-listen 0.8s ease-in-out infinite alternate; }
+.voice-orb--thinking  { animation: voice-orb-think 1.4s linear infinite; }
+.voice-orb--speaking  { animation: voice-orb-speak 0.5s ease-in-out infinite alternate; cursor: pointer; }
+.voice-orb--error     { filter: hue-rotate(140deg) saturate(0.5); }
+
+@keyframes voice-orb-listen {
+  from { box-shadow: 0 0 60px rgba(255, 159, 67, 0.35), 0 0 120px rgba(255, 159, 67, 0.18); }
+  to   { box-shadow: 0 0 80px rgba(255, 159, 67, 0.55), 0 0 180px rgba(255, 159, 67, 0.30); }
+}
+
+@keyframes voice-orb-think {
+  from { filter: hue-rotate(0deg) brightness(0.95); }
+  to   { filter: hue-rotate(360deg) brightness(0.95); }
+}
+
+@keyframes voice-orb-speak {
+  from { box-shadow: 0 0 70px rgba(255, 159, 67, 0.45), 0 0 160px rgba(255, 159, 67, 0.25); }
+  to   { box-shadow: 0 0 110px rgba(255, 200, 130, 0.65), 0 0 220px rgba(255, 159, 67, 0.40); }
+}
+
+.voice-state {
+  font-family: var(--font-body);
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.voice-content {
+  width: 100%;
+  max-width: 720px;
+  min-height: 80px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: center;
+}
+
+.voice-user-text {
+  font-family: var(--font-display, var(--font-body));
+  font-size: 22px;
+  line-height: 1.5;
+  color: var(--text-1);
+  font-style: italic;
+  font-weight: 400;
+  user-select: text;
+}
+
+.voice-response {
+  font-family: var(--font-display, var(--font-body));
+  font-size: 22px;
+  line-height: 1.55;
+  font-weight: 400;
+  user-select: text;
+}
+
+.voice-word {
+  /* Default = unspoken: dim. Spoken words brighten as Kokoro reads them. */
+  color: var(--text-4, rgba(255, 255, 255, 0.22));
+  transition: color 160ms ease;
+}
+.voice-word--spoken {
+  color: var(--text-1);
+}
+
+.voice-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 18px 0 28px;
+  font-weight: 500;
+}

@@ -92,6 +92,12 @@ export async function transcribePending(): Promise<TranscriptSegment[]> {
   return invoke("transcribe_pending");
 }
 
+/** Live preview of the in-progress speech buffer (no DB write).
+ *  Returns "" if there's not enough audio yet. */
+export async function transcribePartial(): Promise<string> {
+  return invoke("transcribe_partial");
+}
+
 export async function checkLlmStatus(): Promise<boolean> {
   return invoke("check_llm_status");
 }
@@ -167,6 +173,9 @@ export interface ChatTurnResult {
   session_id: string;
   user_message_id: string;
   assistant_message_id: string;
+  /** Names of tools the LLM invoked during this turn (e.g. "create_task",
+   *  "end_voice_session"). Voice mode reads this to know when to close. */
+  tools_called: string[];
 }
 
 export async function chatSend(
@@ -174,6 +183,50 @@ export async function chatSend(
   sessionId: string | null
 ): Promise<ChatTurnResult> {
   return invoke("chat_send", { message, sessionId });
+}
+
+/** Streaming variant — fires `chat-token` events with text deltas while the
+ *  model generates. Resolves with the full result once finished. */
+export async function chatSendStream(
+  message: string,
+  sessionId: string | null
+): Promise<ChatTurnResult> {
+  return invoke("chat_send_stream", { message, sessionId });
+}
+
+export interface ChatTokenEvent {
+  /** The id of the assistant message being streamed (matches assistant_message_id). */
+  id: string;
+  /** Text delta to append. */
+  delta: string;
+}
+
+// ===== TTS =====
+
+export interface WordTiming {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface TtsClip {
+  text: string;
+  audio_b64: string;
+  sample_rate: number;
+  duration_ms: number;
+  words: WordTiming[];
+}
+
+export async function ttsSpeak(
+  text: string,
+  voice?: string,
+  speed?: number
+): Promise<TtsClip> {
+  return invoke("tts_speak", { text, voice, speed });
+}
+
+export async function ttsReady(): Promise<boolean> {
+  return invoke("tts_ready");
 }
 
 export interface ChatSession {

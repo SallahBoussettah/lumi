@@ -1,17 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
-  chatSend,
+  chatSendStream,
   listChatSessions,
   getChatMessages,
   deleteChatSession,
   checkLlmStatus,
   reindexEmbeddings,
+  ttsSpeak,
 } from "../lib/tauri";
 import type {
   ChatMessage as ChatMsg,
   ChatSession,
+  ChatTokenEvent,
   SearchHit,
 } from "../lib/tauri";
+import { TtsPlayer } from "../lib/ttsPlayer";
+import { VoiceMode } from "../components/VoiceMode";
 
 interface DisplayMessage {
   id: string;
@@ -34,6 +39,39 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
   const [llmReady, setLlmReady] = useState<boolean | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const ttsRef = useRef<TtsPlayer | null>(null);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+
+  function getTts(): TtsPlayer {
+    if (!ttsRef.current) ttsRef.current = new TtsPlayer();
+    return ttsRef.current;
+  }
+
+  async function handleSpeak(id: string, text: string) {
+    const tts = getTts();
+    if (speakingId === id) {
+      tts.stop();
+      setSpeakingId(null);
+      return;
+    }
+    tts.stop();
+    setSpeakingId(id);
+    try {
+      const clip = await ttsSpeak(text);
+      await tts.enqueue(clip);
+      // Auto-clear when done.
+      const unsub = tts.subscribe((s) => {
+        if (!s.playing) {
+          setSpeakingId((cur) => (cur === id ? null : cur));
+          unsub();
+        }
+      });
+    } catch (e) {
+      console.error("TTS failed:", e);
+      setSpeakingId(null);
+    }
+  }
 
   const loadSessions = useCallback(async () => {
     try {
@@ -107,30 +145,41 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
 
-    // Optimistic user message
-    const tempId = `tmp-${Date.now()}`;
+    // Optimistic user + empty assistant placeholder we stream into
+    const tempUserId = `tmp-user-${Date.now()}`;
+    const streamingId = `tmp-asst-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
-      { id: tempId, sender: "user", text },
+      { id: tempUserId, sender: "user", text },
+      { id: streamingId, sender: "assistant", text: "" },
     ]);
 
-    try {
-      const result = await chatSend(text, activeSession);
+    const unlisten = await listen<ChatTokenEvent>("chat-token", (e) => {
+      const delta = e.payload.delta;
+      if (!delta) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === streamingId ? { ...m, text: m.text + delta } : m
+        )
+      );
+    });
 
-      setMessages((prev) => {
-        // Replace optimistic with real, then append assistant
-        const without = prev.filter((m) => m.id !== tempId);
-        return [
-          ...without,
-          { id: result.user_message_id, sender: "user", text },
-          {
-            id: result.assistant_message_id,
-            sender: "assistant",
-            text: result.answer,
-            sources: result.sources,
-          },
-        ];
-      });
+    try {
+      const result = await chatSendStream(text, activeSession);
+
+      setMessages((prev) =>
+        prev
+          .filter((m) => m.id !== tempUserId && m.id !== streamingId)
+          .concat([
+            { id: result.user_message_id, sender: "user", text },
+            {
+              id: result.assistant_message_id,
+              sender: "assistant",
+              text: result.answer,
+              sources: result.sources,
+            },
+          ])
+      );
 
       if (!activeSession) {
         setActiveSession(result.session_id);
@@ -138,17 +187,21 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
       await loadSessions();
     } catch (err) {
       console.error("Chat send failed:", err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
-          sender: "assistant",
-          text: `Error: ${err}`,
-        },
-      ]);
+      setMessages((prev) =>
+        prev
+          .filter((m) => m.id !== streamingId)
+          .concat([
+            {
+              id: `err-${Date.now()}`,
+              sender: "assistant",
+              text: `Error: ${err}`,
+            },
+          ])
+      );
+    } finally {
+      unlisten();
+      setSending(false);
     }
-
-    setSending(false);
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -229,7 +282,16 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
           ) : (
             messages.map((m) => (
               <div key={m.id} className={`chat-msg ${m.sender}`}>
-                <div className="chat-bubble">{m.text}</div>
+                {m.sender === "assistant" && m.text === "" ? (
+                  <div className="chat-thinking">
+                    <span>thinking</span>
+                    <span className="chat-dots">
+                      <span /><span /><span />
+                    </span>
+                  </div>
+                ) : (
+                  <div className="chat-bubble">{m.text}</div>
+                )}
                 {m.sources && m.sources.length > 0 && (
                   <div className="chat-sources">
                     {m.sources.slice(0, 4).map((s, i) => (
@@ -245,19 +307,19 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
                     ))}
                   </div>
                 )}
+                {m.sender === "assistant" && m.text && (
+                  <button
+                    className={`chat-speak-btn ${speakingId === m.id ? "active" : ""}`}
+                    onClick={() => handleSpeak(m.id, m.text)}
+                    title={speakingId === m.id ? "Stop" : "Speak"}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
+                      {speakingId === m.id ? "stop" : "volume_up"}
+                    </span>
+                  </button>
+                )}
               </div>
             ))
-          )}
-
-          {sending && (
-            <div className="chat-msg assistant">
-              <div className="chat-thinking">
-                <span>thinking</span>
-                <span className="chat-dots">
-                  <span /><span /><span />
-                </span>
-              </div>
-            </div>
           )}
         </div>
 
@@ -281,6 +343,16 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
               disabled={sending || llmReady === false}
             />
             <button
+              className="chat-voice-btn"
+              onClick={() => setVoiceModeOpen(true)}
+              disabled={sending || llmReady === false}
+              title="Voice mode — hands-free conversation"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                graphic_eq
+              </span>
+            </button>
+            <button
               className="chat-send"
               onClick={send}
               disabled={sending || !input.trim() || llmReady === false}
@@ -293,6 +365,33 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
           </div>
         </div>
       </div>
+
+      {voiceModeOpen && (
+        <VoiceMode
+          sessionId={activeSession}
+          onSessionUpdate={(sid) => {
+            if (activeSession !== sid) setActiveSession(sid);
+            void loadSessions();
+          }}
+          onClose={() => {
+            setVoiceModeOpen(false);
+            // Refresh messages for the active session so the voice turns appear
+            if (activeSession) {
+              getChatMessages(activeSession)
+                .then((msgs) =>
+                  setMessages(
+                    msgs.map((m) => ({
+                      id: m.id,
+                      sender: m.sender,
+                      text: m.text,
+                    }))
+                  )
+                )
+                .catch(() => {});
+            }
+          }}
+        />
+      )}
     </>
   );
 }

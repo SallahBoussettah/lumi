@@ -1,6 +1,7 @@
 mod audio;
 mod db;
 mod llm;
+mod tts;
 
 use audio::capture::SpeechBuffer;
 use audio::transcribe::{self, Transcriber, TranscriptSegment};
@@ -11,6 +12,7 @@ use db::Database;
 use llm::client::{ChatMessage, LlmClient};
 use llm::embed::Embedder;
 use llm::rag::{self, SearchHit};
+use tts::sidecar::{self as tts_sidecar, TtsSidecar};
 use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -285,6 +287,42 @@ fn transcribe_pending(
     }
 
     Ok(all_results)
+}
+
+/// Run a quick transcription on the *in-progress* speech buffer without
+/// consuming it. Used by voice mode for live captions while the user is
+/// still talking. Returns "" if there's no buffered speech yet, or if the
+/// transcriber isn't initialized. Does NOT write to the database.
+#[tauri::command]
+fn transcribe_partial(
+    speech_buf: tauri::State<'_, Arc<Mutex<SpeechBuffer>>>,
+    transcriber: tauri::State<'_, TranscriberHolder>,
+) -> Result<String, String> {
+    // Snapshot the current samples so we don't hold the lock during inference.
+    let snapshot: Vec<f32> = {
+        let buf = speech_buf.lock().map_err(|e| e.to_string())?;
+        if buf.samples.len() < 16_000 / 2 {
+            // <0.5s of audio — whisper hallucinates on tiny inputs.
+            return Ok(String::new());
+        }
+        buf.samples.clone()
+    };
+
+    let t_guard = transcriber.0.lock().map_err(|e| e.to_string())?;
+    let Some(t) = t_guard.as_ref() else {
+        return Ok(String::new());
+    };
+
+    match t.transcribe(&snapshot) {
+        Ok(segs) => Ok(segs
+            .into_iter()
+            .map(|s| s.text)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string()),
+        Err(_) => Ok(String::new()),
+    }
 }
 
 /// Search conversations by title, overview, and full-text transcript.
@@ -614,6 +652,10 @@ struct ChatTurnResult {
     session_id: String,
     user_message_id: String,
     assistant_message_id: String,
+    /// Names of tools the model invoked during this turn (in call order).
+    /// The frontend uses this to react to side-effecting calls like
+    /// `end_voice_session` without parsing answer text.
+    tools_called: Vec<String>,
 }
 
 /// Backfill embeddings for memories and conversations that don't have one yet.
@@ -762,7 +804,7 @@ async fn chat_send(
     }
 
     // Run RAG chat
-    let (answer, sources) =
+    let (answer, sources, tools_called) =
         rag::chat_with_context(&llm, &embedder, &db.inner().clone(), &history, &message).await?;
 
     // Persist assistant message
@@ -796,7 +838,116 @@ async fn chat_send(
         session_id,
         user_message_id: user_msg_id,
         assistant_message_id: asst_msg_id,
+        tools_called,
     })
+}
+
+/// Streaming variant of chat_send. Emits `chat-token` events with text deltas
+/// and a final `chat-done` event with the full result. The promise resolves
+/// only after the model has finished (or errored).
+#[tauri::command]
+async fn chat_send_stream(
+    app: tauri::AppHandle,
+    message: String,
+    session_id: Option<String>,
+    llm: tauri::State<'_, Arc<LlmClient>>,
+    embedder: tauri::State<'_, Arc<Embedder>>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<ChatTurnResult, String> {
+    if message.trim().is_empty() {
+        return Err("Empty message".to_string());
+    }
+
+    let session_id = match session_id {
+        Some(s) => s,
+        None => {
+            let id = uuid::Uuid::new_v4().to_string();
+            let conn = db.conn();
+            conn.execute(
+                "INSERT INTO chat_sessions (id, title) VALUES (?1, ?2)",
+                rusqlite::params![id, &message.chars().take(60).collect::<String>()],
+            )
+            .map_err(|e| e.to_string())?;
+            id
+        }
+    };
+
+    let history: Vec<ChatMessage> = {
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare("SELECT sender, text FROM messages WHERE session_id = ?1 ORDER BY created_at")
+            .map_err(|e| e.to_string())?;
+        let iter = stmt
+            .query_map([&session_id], |row| {
+                let sender = row.get::<_, String>(0)?;
+                let text = row.get::<_, String>(1)?;
+                Ok(if sender == "user" {
+                    ChatMessage::user(text)
+                } else {
+                    ChatMessage::assistant(text)
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        iter.filter_map(|r| r.ok()).collect()
+    };
+
+    let user_msg_id = uuid::Uuid::new_v4().to_string();
+    {
+        let conn = db.conn();
+        conn.execute(
+            "INSERT INTO messages (id, session_id, text, sender) VALUES (?1, ?2, ?3, 'user')",
+            rusqlite::params![user_msg_id, session_id, message],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let asst_msg_id = uuid::Uuid::new_v4().to_string();
+    let stream_id = asst_msg_id.clone();
+    let app_for_emit = app.clone();
+
+    let (answer, sources, tools_called) = rag::chat_with_context_stream(
+        &llm,
+        &embedder,
+        &db.inner().clone(),
+        &history,
+        &message,
+        |delta| {
+            let _ = app_for_emit.emit(
+                "chat-token",
+                serde_json::json!({
+                    "id": stream_id,
+                    "delta": delta,
+                }),
+            );
+        },
+    )
+    .await?;
+
+    {
+        let conn = db.conn();
+        conn.execute(
+            "INSERT INTO messages (id, session_id, text, sender) VALUES (?1, ?2, ?3, 'assistant')",
+            rusqlite::params![asst_msg_id, session_id, answer],
+        )
+        .map_err(|e| e.to_string())?;
+        let _ = conn.execute(
+            "UPDATE chat_sessions SET updated_at = datetime('now') WHERE id = ?1",
+            [&session_id],
+        );
+    }
+
+    let result = ChatTurnResult {
+        answer,
+        sources,
+        session_id,
+        user_message_id: user_msg_id,
+        assistant_message_id: asst_msg_id,
+        tools_called,
+    };
+
+    let _ = app.emit("chat-done", &result);
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1113,6 +1264,43 @@ async fn process_conversation_cmd(
 }
 
 // =====================================================
+// TTS
+// =====================================================
+
+/// Synthesize speech for the given text. Returns base64 WAV audio +
+/// approximate per-word timings. The frontend decodes and plays it.
+#[tauri::command]
+async fn tts_speak(
+    text: String,
+    voice: Option<String>,
+    speed: Option<f32>,
+    http: tauri::State<'_, reqwest::Client>,
+) -> Result<tts_sidecar::SpeakResponse, String> {
+    if text.trim().is_empty() {
+        return Err("Empty text".to_string());
+    }
+    tts_sidecar::speak(&http, &text, voice.as_deref(), speed).await
+}
+
+/// Returns true once the Kokoro sidecar is reachable and warm.
+/// The frontend polls this before enabling voice mode.
+#[tauri::command]
+async fn tts_ready(http: tauri::State<'_, reqwest::Client>) -> Result<bool, String> {
+    let resp = http
+        .get(format!("{}/health", tts_sidecar::TTS_BASE_URL))
+        .timeout(std::time::Duration::from_millis(500))
+        .send()
+        .await;
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let v: serde_json::Value = r.json().await.unwrap_or_default();
+            Ok(v.get("model_loaded").and_then(|b| b.as_bool()).unwrap_or(false))
+        }
+        _ => Ok(false),
+    }
+}
+
+// =====================================================
 // FLOATING BAR
 // =====================================================
 
@@ -1224,6 +1412,18 @@ pub fn run() {
 
     let embedder = Arc::new(Embedder::new());
 
+    // Shared HTTP client for talking to local sidecars (TTS, etc.)
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .expect("failed to build reqwest client");
+
+    // Kokoro TTS sidecar — spawn on startup, kill on exit.
+    let tts = Arc::new(TtsSidecar::new());
+    if let Err(e) = tts.start() {
+        log::warn!("TTS sidecar not started: {}", e);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
@@ -1319,6 +1519,8 @@ pub fn run() {
         .manage(llm_client)
         .manage(current_conversation)
         .manage(embedder)
+        .manage(http_client)
+        .manage(tts)
         .invoke_handler(tauri::generate_handler![
             get_db_stats,
             list_audio_devices,
@@ -1330,6 +1532,7 @@ pub fn run() {
             get_recording_status,
             init_transcriber,
             transcribe_pending,
+            transcribe_partial,
             has_whisper_model,
             check_llm_status,
             get_active_model,
@@ -1353,6 +1556,7 @@ pub fn run() {
             show_main_window,
             show_main_window_with_chat,
             chat_send,
+            chat_send_stream,
             list_chat_sessions,
             get_chat_messages,
             delete_chat_session,
@@ -1361,6 +1565,8 @@ pub fn run() {
             update_memory,
             dismiss_memory,
             delete_memory,
+            tts_speak,
+            tts_ready,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

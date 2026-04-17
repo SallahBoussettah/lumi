@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::RwLock;
@@ -202,6 +203,133 @@ impl LlmClient {
             .next()
             .map(|c| c.message)
             .ok_or("No response from LLM".to_string())
+    }
+
+    /// Stream messages with optional tool defs. Calls `on_token` for every
+    /// content delta from the model. Returns the final assembled message
+    /// (including tool_calls if the model decided to call any).
+    pub async fn chat_messages_stream<F>(
+        &self,
+        messages: &[ChatMessage],
+        tools: Option<&[ToolDef]>,
+        mut on_token: F,
+    ) -> Result<ChatMessage, String>
+    where
+        F: FnMut(&str) + Send,
+    {
+        let url = format!("{}/v1/chat/completions", self.base_url);
+
+        let request = ChatRequest {
+            model: self.model(),
+            messages: messages.to_vec(),
+            temperature: 0.3,
+            stream: true,
+            tools: tools.map(|t| t.to_vec()),
+        };
+
+        let resp = self
+            .http
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("LLM request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("LLM error {}: {}", status, body));
+        }
+
+        let mut content = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut buffer = String::new();
+        let mut stream = resp.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("Stream chunk error: {}", e))?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // SSE frames are separated by double newlines, each line begins
+            // with `data: ` and contains JSON (or [DONE]).
+            while let Some(idx) = buffer.find("\n\n") {
+                let frame = buffer[..idx].to_string();
+                buffer.drain(..idx + 2);
+
+                for line in frame.lines() {
+                    let line = line.trim_start();
+                    if !line.starts_with("data: ") {
+                        continue;
+                    }
+                    let payload = &line[6..];
+                    if payload == "[DONE]" {
+                        continue;
+                    }
+                    let parsed: Value = match serde_json::from_str(payload) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    let Some(choice) = parsed
+                        .get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|a| a.first())
+                    else {
+                        continue;
+                    };
+                    let Some(delta) = choice.get("delta") else {
+                        continue;
+                    };
+                    if let Some(text) = delta.get("content").and_then(|c| c.as_str()) {
+                        if !text.is_empty() {
+                            content.push_str(text);
+                            on_token(text);
+                        }
+                    }
+                    // Accumulate tool calls — Ollama can send these in deltas
+                    if let Some(calls) = delta.get("tool_calls").and_then(|c| c.as_array()) {
+                        for call in calls {
+                            // Each call has an index — append by index
+                            let index = call.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
+                                as usize;
+                            while tool_calls.len() <= index {
+                                tool_calls.push(ToolCall {
+                                    id: String::new(),
+                                    kind: "function".to_string(),
+                                    function: ToolCallFunction {
+                                        name: String::new(),
+                                        arguments: String::new(),
+                                    },
+                                });
+                            }
+                            let tc = &mut tool_calls[index];
+                            if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
+                                tc.id = id.to_string();
+                            }
+                            if let Some(func) = call.get("function") {
+                                if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                    tc.function.name.push_str(name);
+                                }
+                                if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                                    tc.function.arguments.push_str(args);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(ChatMessage {
+            role: "assistant".to_string(),
+            content,
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
+            tool_call_id: None,
+            name: None,
+        })
     }
 
     pub async fn health_check(&self) -> Result<bool, String> {

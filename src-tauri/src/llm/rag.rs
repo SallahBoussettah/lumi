@@ -141,6 +141,7 @@ Use this date as today, NOT your training cutoff. When creating tasks with due_a
 You have these tools — they are the ONLY way to actually change anything:
 - create_task / update_task / complete_task / list_tasks
 - create_memory / update_memory / delete_memory / list_memories
+- end_voice_session — call ONLY when the user clearly signals they're wrapping up the voice conversation ("thanks, that's all", "talk later", "I'm done", "goodbye"). Always pair with a brief warm farewell in your text reply (one short sentence). Never call this just because their question was answered.
 
 You MUST call a tool when the user asks you to:
 - "add a task / remind me / I need to" → create_task
@@ -188,6 +189,12 @@ fn current_system_prompt() -> String {
         .replace("{year}", &now.format("%Y").to_string())
 }
 
+/// Result of a chat turn — text answer, retrieval hits, and the list of
+/// tool names invoked during the turn (in call order, with duplicates).
+/// Tool names let the caller react to side-effecting calls like
+/// `end_voice_session` without parsing the answer text.
+pub type ChatTurn = (String, Vec<SearchHit>, Vec<String>);
+
 /// Run a RAG-augmented chat turn with tool-calling support.
 /// Loops up to 5 times executing tool calls and feeding results back until
 /// the model returns a final text response.
@@ -197,7 +204,7 @@ pub async fn chat_with_context(
     db: &Arc<Database>,
     history: &[ChatMessage],
     user_message: &str,
-) -> Result<(String, Vec<SearchHit>), String> {
+) -> Result<ChatTurn, String> {
     let hits = search(embedder, db, user_message, 6)
         .await
         .unwrap_or_default();
@@ -213,6 +220,7 @@ pub async fn chat_with_context(
     messages.push(ChatMessage::user(user_message));
 
     let tools = tools::tool_definitions();
+    let mut tools_called: Vec<String> = Vec::new();
 
     // Tool-call loop — bounded to prevent infinite loops
     for iteration in 0..5 {
@@ -231,7 +239,7 @@ pub async fn chat_with_context(
 
         if calls.is_empty() {
             // Final answer
-            return Ok((response.content, hits));
+            return Ok((response.content, hits, tools_called));
         }
 
         log::info!("Tool-call loop iter {}: {} call(s)", iteration, calls.len());
@@ -241,6 +249,7 @@ pub async fn chat_with_context(
 
         // Execute each tool and append results
         for call in &calls {
+            tools_called.push(call.function.name.clone());
             let result = match tools::execute_tool(
                 &call.function.name,
                 &call.function.arguments,
@@ -266,5 +275,98 @@ pub async fn chat_with_context(
         "I tried multiple actions but didn't reach a final answer. Please rephrase or try again."
             .to_string(),
         hits,
+        tools_called,
     ))
+}
+
+/// Streaming version: calls `on_token` for every text delta from the model.
+/// Tool-calling iterations are silent — only the FINAL text response streams
+/// to the user, so they don't see partial tool-aware output.
+pub async fn chat_with_context_stream<F>(
+    llm: &LlmClient,
+    embedder: &Embedder,
+    db: &Arc<Database>,
+    history: &[ChatMessage],
+    user_message: &str,
+    mut on_token: F,
+) -> Result<ChatTurn, String>
+where
+    F: FnMut(&str) + Send,
+{
+    let hits = search(embedder, db, user_message, 6)
+        .await
+        .unwrap_or_default();
+    let context = format_context(&hits);
+
+    let mut messages: Vec<ChatMessage> = Vec::new();
+    messages.push(ChatMessage::system(format!(
+        "{}\n\n---\n\n{}",
+        current_system_prompt(),
+        context
+    )));
+    messages.extend_from_slice(history);
+    messages.push(ChatMessage::user(user_message));
+
+    let tool_defs = tools::tool_definitions();
+    let mut tools_called: Vec<String> = Vec::new();
+
+    let mut accumulated = String::new();
+
+    for iteration in 0..5 {
+        let mut iteration_text = String::new();
+        let response = llm
+            .chat_messages_stream(&messages, Some(&tool_defs), |t| {
+                iteration_text.push_str(t);
+                // Stream live: every token immediately emitted
+                on_token(t);
+            })
+            .await?;
+
+        accumulated.push_str(&iteration_text);
+        let calls = response.tool_calls.clone().unwrap_or_default();
+        log::info!(
+            "Stream iter {}: text_len={}, tool_calls={}",
+            iteration,
+            iteration_text.len(),
+            calls.len()
+        );
+
+        if calls.is_empty() {
+            // Final answer — already streamed
+            return Ok((accumulated, hits, tools_called));
+        }
+
+        // Tool-calling iteration: execute, then continue. The text we just
+        // streamed was the model's preamble (e.g. "I'll do that for you").
+        // Add a small separator before the next iteration's text starts.
+        if !iteration_text.is_empty() {
+            on_token("\n\n");
+            accumulated.push_str("\n\n");
+        }
+        messages.push(response);
+        for call in &calls {
+            tools_called.push(call.function.name.clone());
+            let result = match tools::execute_tool(
+                &call.function.name,
+                &call.function.arguments,
+                db,
+                embedder,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(e) => format!("Error: {}", e),
+            };
+            log::info!("  -> {}: {}", call.function.name, result);
+            messages.push(ChatMessage::tool_result(
+                &call.id,
+                &call.function.name,
+                result,
+            ));
+        }
+    }
+
+    let fallback = "I tried multiple actions but didn't reach a final answer.";
+    on_token(fallback);
+    Ok((accumulated + fallback, hits, tools_called))
 }

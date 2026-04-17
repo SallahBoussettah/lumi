@@ -1,0 +1,16 @@
+[project]
+name = "omniscient-tts"
+version = "0.1.0"
+description = "Kokoro TTS sidecar for Omniscient (PyTorch backend with real word timings)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "kokoro>=0.9",
+    "misaki[en]>=0.9",
+    # CPU torch — small enough for 82M params, avoids ROCm setup. uv resolves
+    # the CPU build automatically when no GPU index is configured.
+    "torch>=2.4",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "soundfile>=0.12",
+    "numpy>=2.0",
+]
