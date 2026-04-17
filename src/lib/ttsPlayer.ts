@@ -10,7 +10,26 @@ import type { TtsClip } from "./tauri";
  *
  * Each clip is decoded from base64 WAV and scheduled on the same
  * AudioContext so adjacent clips chain seamlessly with no audible gap.
+ *
+ * IMPORTANT: All TtsPlayer instances share ONE module-level AudioContext.
+ * Chromium caps ~6 concurrent contexts per origin — creating a fresh one
+ * per click (e.g. Settings voice preview) silently exhausts the pool and
+ * subsequent previews stop producing audio with no error. Suspending and
+ * resuming a single context is the correct lifecycle.
  */
+
+let sharedCtx: AudioContext | null = null;
+function getSharedCtx(): AudioContext {
+  if (!sharedCtx) {
+    sharedCtx = new (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext)();
+  }
+  if (sharedCtx.state === "suspended") {
+    sharedCtx.resume().catch(() => {});
+  }
+  return sharedCtx;
+}
 
 export interface PlaybackState {
   /** Index of the currently-playing clip in the lifetime queue, or -1 if idle. */
@@ -33,27 +52,18 @@ interface QueuedClip {
 }
 
 export class TtsPlayer {
-  private ctx: AudioContext | null = null;
   private queue: QueuedClip[] = [];
   private nextIndex = 0;
   private currentIndex = -1;
   private listeners = new Set<Listener>();
   private rafId: number | null = null;
 
-  private ensureCtx(): AudioContext {
-    if (!this.ctx) {
-      this.ctx = new (window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext)();
-    }
-    if (this.ctx.state === "suspended") {
-      this.ctx.resume().catch(() => {});
-    }
-    return this.ctx;
+  private get ctx(): AudioContext {
+    return getSharedCtx();
   }
 
   async enqueue(clip: TtsClip): Promise<void> {
-    const ctx = this.ensureCtx();
+    const ctx = this.ctx;
     const buffer = await this.decode(clip.audio_b64, ctx);
     const item: QueuedClip = {
       clip,
@@ -78,7 +88,6 @@ export class TtsPlayer {
    * Each new clip starts at the previous clip's end so playback is gapless.
    */
   private scheduleNext() {
-    if (!this.ctx) return;
     const ctx = this.ctx;
     let cursor = ctx.currentTime;
 
@@ -118,7 +127,6 @@ export class TtsPlayer {
 
   private tick = () => {
     this.rafId = null;
-    if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
     // Find the clip we're inside right now
@@ -178,7 +186,6 @@ export class TtsPlayer {
   }
 
   isPlaying(): boolean {
-    if (!this.ctx) return false;
     const now = this.ctx.currentTime;
     return this.queue.some(
       (q) => q.startedAt !== null && q.startedAt + q.buffer.duration > now

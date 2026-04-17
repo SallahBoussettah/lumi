@@ -85,6 +85,25 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 
 ---
 
+## Phase 4.7: Omi-inspired prompt + tool wins
+
+Pure-prompt-engineering improvements lifted from analyzing the Omi reference
+codebase. No new infra, no new dependencies — just smarter prompts and a
+richer tool surface for the local LLM. Reference notes in `OMI-DESIGN.md`.
+
+- [ ] Memory schema upgrade — split into `system` (facts about the user) and
+  `interesting` (wisdom from others, with attribution)
+- [ ] Memory extraction prompt rewrite — port Omi's 300-line prompt with
+  explicit do/don't examples, banned hedging language, and a Q1/Q2
+  categorization decision tree
+- [ ] LLM-based memory dedup resolver — when a similar memory exists, ask the
+  model to choose `keep_new` / `keep_existing` / `merge` / `keep_both`
+- [ ] Agentic RAG — expose more tools to the chat loop (search_memories,
+  search_conversations, search_tasks, get_today_summary) so qwen can decide
+  what to fetch instead of always relying on cosine pre-retrieval
+
+---
+
 ## Phase 5: Screen Capture + OCR + Rewind
 
 - [ ] PipeWire XDG Desktop Portal screen capture
@@ -92,14 +111,23 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 - [ ] Perceptual dedup with dHash
 - [ ] Tesseract OCR on captured frames
 - [ ] FTS5 index over OCR text
+- [ ] Embeddings over OCR text for semantic search (Omi uses Gemini's
+  3072-dim embeddings with explicit RETRIEVAL_QUERY/RETRIEVAL_DOCUMENT
+  task pairing — we'd use nomic-embed-text)
 - [ ] Rewind/timeline view: scroll through screen history
-- [ ] Search across screen history
+- [ ] Search across screen history (FTS5 + semantic combined)
 
 ---
 
 ## Phase 6: Proactive Assistants (Focus + Tasks + Memory)
 
 - [ ] Window/app focus change detection via D-Bus
+- [ ] **Normalized window titles** — strip Braille spinners, timer patterns,
+  terminal dimensions, `(N)` notification badges so we don't re-analyze
+  cosmetic title changes (Omi's `ContextDetection.normalizeWindowTitle()`)
+- [ ] **3-stage proactive notification chain** — Gate (cheap LLM relevance
+  check) → Generate (with frequency_guidance 1-12/day) → Critic ("would I
+  want this on my phone right now?"). Banned phrases + smart-friend tone.
 - [ ] FocusAssistant: detect distraction, show nudge notifications
 - [ ] TaskAssistant: extract action items on context switch
 - [ ] MemoryAssistant: extract facts from screen content
@@ -124,6 +152,10 @@ An always-on AI assistant for Linux that sees your screen, hears your conversati
 
 ## Phase 8: Knowledge Graph + People
 
+- [ ] **Per-memory entity + relationship extraction** — for each new memory,
+  extract `(label, node_type, aliases)` entities and `(source, target, label)`
+  edges. Pass existing nodes back to the LLM to reuse IDs and avoid
+  duplicates. Store in SQLite (`nodes` + `edges` tables) instead of Neo4j.
 - [ ] Knowledge graph extraction from conversations
 - [ ] People management with speaker profiles
 - [ ] Speaker diarization with pyannote

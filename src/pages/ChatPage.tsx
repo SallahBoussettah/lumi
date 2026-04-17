@@ -82,6 +82,12 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
   const voiceListeningRef = useRef(false);
   const voiceTranscriptBufRef = useRef("");
   const voicePartialBusyRef = useRef(false);
+  // Set true while a `transcribePending` whisper call is running. The
+  // partial poll yields when this is set so the two pollers don't both
+  // contend for the transcriber mutex on the Rust side (which would
+  // serialize them anyway and risk dropping cpal audio frames during
+  // the long whisper inference).
+  const voicePendingBusyRef = useRef(false);
   const voicePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voicePartialPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceRearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -229,7 +235,18 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
         const status = await getRecordingStatus();
         setVoiceAudioLevel(status.audio_level);
 
-        const segs = await transcribePending();
+        // Mark pending-transcribe in flight so partial poll yields. Whisper
+        // holds its mutex for the full inference; without this gate the
+        // partial poller piles a second whisper call behind it and the
+        // cpal audio thread can stall during the back-to-back inference.
+        voicePendingBusyRef.current = true;
+        let segs: TranscriptSegment[];
+        try {
+          segs = await transcribePending();
+        } finally {
+          voicePendingBusyRef.current = false;
+        }
+
         if (segs.length > 0) {
           const newText = segs.map((s: TranscriptSegment) => s.text).join(" ");
           voiceTranscriptBufRef.current = (
@@ -270,7 +287,12 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
 
     voicePartialPollRef.current = setInterval(async () => {
       if (!voiceListeningRef.current) return;
+      // Skip our own previous tick if it hasn't returned yet…
       if (voicePartialBusyRef.current) return;
+      // …AND skip if the pending-segment poller is mid-whisper-call.
+      // Both polls hit the same Rust-side transcriber mutex; doubling
+      // up only delays both AND blocks cpal audio frames.
+      if (voicePendingBusyRef.current) return;
       voicePartialBusyRef.current = true;
       try {
         const partial = (await transcribePartial()).trim();
@@ -408,13 +430,23 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
   }, [messages, sending]);
 
   // Cleanup on unmount — drop any active recording / TTS.
+  // CRITICAL: only cancel a recording WE started (voice mode). The
+  // unmount handler used to fire `cancelRecording()` unconditionally,
+  // which destroyed recordings started from the Sidebar/FloatingBar/
+  // Conversations page when the user navigated through Chat. That was
+  // silent data loss. Now we only touch recording state we own.
   useEffect(() => {
     return () => {
       if (voicePollRef.current) clearInterval(voicePollRef.current);
       if (voicePartialPollRef.current) clearInterval(voicePartialPollRef.current);
       if (voiceRearmTimerRef.current) clearTimeout(voiceRearmTimerRef.current);
       ttsRef.current?.stop();
-      cancelRecording().catch(() => {});
+      // Only cancel if WE were the recording owner. voiceListeningRef is
+      // true while voice mode has the mic open; voiceModeRef is true even
+      // between turns when the mic auto-rearms after a reply.
+      if (voiceListeningRef.current || voiceModeRef.current) {
+        cancelRecording().catch(() => {});
+      }
     };
   }, []);
 
@@ -488,8 +520,10 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
       if (batcher) batcher.push(delta);
     });
 
-    // chat-retry: model lied, reset the displayed bubble + TTS state.
-    const unlistenRetry = await listen("chat-retry", () => {
+    // Reset handler — wipes streamed text + voice state. Used for both:
+    // - chat-preamble-drop: silent UX cleanup between tool-call iterations
+    // - chat-retry: judge caught a hallucinated claim, force redo
+    const resetStream = () => {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === streamingId ? { ...m, text: "" } : m
@@ -504,7 +538,9 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
         setVoiceClipIndex(-1);
         setVoiceMsInClip(0);
       }
-    });
+    };
+    const unlistenPreamble = await listen("chat-preamble-drop", resetStream);
+    const unlistenRetry = await listen("chat-retry", resetStream);
 
     try {
       const result = await chatSendStream(text, activeSession);
@@ -527,6 +563,15 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
       // Hand karaoke tracking off to the real assistant message id.
       if (wasVoiceTurn) {
         setVoiceStreamingId(result.assistant_message_id);
+      }
+
+      // The LLM has an `end_voice_session` tool that signals "the user said
+      // goodbye, please close voice mode". Honor it here — disable voice
+      // mode so the mic doesn't auto-rearm after the farewell. The
+      // currently-queued TTS still finishes playing.
+      if (wasVoiceTurn && result.tools_called?.includes("end_voice_session")) {
+        voiceModeRef.current = false;
+        setVoiceMode(false);
       }
 
       if (!activeSession) setActiveSession(result.session_id);
@@ -556,6 +601,7 @@ export function ChatPage({ initialSessionId, onSessionConsumed }: ChatPageProps 
       }
     } finally {
       unlistenToken();
+      unlistenPreamble();
       unlistenRetry();
       setSending(false);
     }

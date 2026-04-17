@@ -176,8 +176,11 @@ fn cancel_recording(
     let conv_id = current_conv.lock().map_err(|e| e.to_string())?.take();
     if let Some(id) = conv_id {
         let conn = db.conn();
-        let _ = conn.execute("DELETE FROM conversations WHERE id = ?1", [&id]);
-        log::info!("Cancelled and deleted conversation {}", id);
+        if let Err(e) = conn.execute("DELETE FROM conversations WHERE id = ?1", [&id]) {
+            log::warn!("Cancel cleanup: DELETE conversation {} failed: {}", id, e);
+        } else {
+            log::info!("Cancelled and deleted conversation {}", id);
+        }
     }
 
     Ok(())
@@ -203,11 +206,14 @@ fn stop_recording(
 
     if let Some(ref id) = conv_id {
         let conn = db.conn();
-        let _ = conn.execute(
+        if let Err(e) = conn.execute(
             "UPDATE conversations SET finished_at = datetime('now'), status = 'processing' WHERE id = ?1",
             rusqlite::params![id],
-        );
-        log::info!("Stopped recording conversation {}", id);
+        ) {
+            log::warn!("stop_recording: status update for {} failed: {}", id, e);
+        } else {
+            log::info!("Stopped recording conversation {}", id);
+        }
     }
 
     Ok(conv_id)
@@ -302,7 +308,7 @@ fn transcribe_pending(
 
                     let conn = db.conn();
                     let id = uuid::Uuid::new_v4().to_string();
-                    let _ = conn.execute(
+                    if let Err(e) = conn.execute(
                         "INSERT INTO transcript_segments (id, conversation_id, text, start_time, end_time)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
                         rusqlite::params![
@@ -312,7 +318,14 @@ fn transcribe_pending(
                             seg.start_ms as f64 / 1000.0,
                             seg.end_ms as f64 / 1000.0,
                         ],
-                    );
+                    ) {
+                        // Most common cause: conv_id no longer exists (FK).
+                        // Happens if recording was cancelled mid-transcribe.
+                        log::warn!(
+                            "transcribe_pending: INSERT segment for conv {} failed: {}",
+                            conv_id, e
+                        );
+                    }
                 }
                 all_results.extend(results);
             }
@@ -662,14 +675,18 @@ async fn reprocess_conversation(
     // Clear previously extracted items for clean reprocessing
     {
         let conn = db.conn();
-        let _ = conn.execute(
+        if let Err(e) = conn.execute(
             "DELETE FROM memories WHERE conversation_id = ?1",
             [&conversation_id],
-        );
-        let _ = conn.execute(
+        ) {
+            log::warn!("reprocess: clear memories for {} failed: {}", conversation_id, e);
+        }
+        if let Err(e) = conn.execute(
             "DELETE FROM action_items WHERE conversation_id = ?1",
             [&conversation_id],
-        );
+        ) {
+            log::warn!("reprocess: clear action_items for {} failed: {}", conversation_id, e);
+        }
     }
 
     llm::processor::process_conversation(&llm, &db.inner().clone(), &conversation_id, &transcript)
@@ -853,10 +870,12 @@ async fn chat_send(
         )
         .map_err(|e| e.to_string())?;
         // Bump session updated_at
-        let _ = conn.execute(
+        if let Err(e) = conn.execute(
             "UPDATE chat_sessions SET updated_at = datetime('now') WHERE id = ?1",
             [&session_id],
-        );
+        ) {
+            log::warn!("chat_send: bump session timestamp failed: {}", e);
+        }
     }
 
     Ok(ChatTurnResult {
@@ -940,8 +959,10 @@ async fn chat_send_stream(
     let asst_msg_id = uuid::Uuid::new_v4().to_string();
     let stream_id = asst_msg_id.clone();
     let app_for_emit = app.clone();
-    let app_for_retry = app.clone();
-    let retry_id = asst_msg_id.clone();
+    let app_for_preamble = app.clone();
+    let app_for_judge = app.clone();
+    let preamble_id = asst_msg_id.clone();
+    let judge_id = asst_msg_id.clone();
 
     let (answer, sources, tools_called) = rag::chat_with_context_stream(
         &llm,
@@ -959,9 +980,21 @@ async fn chat_send_stream(
             );
         },
         || {
-            let _ = app_for_retry.emit(
+            // Tool preamble drop — silent UX cleanup. Frontend should wipe
+            // the bubble's current text without surfacing anything to the
+            // user. Fires at most once per turn.
+            let _ = app_for_preamble.emit(
+                "chat-preamble-drop",
+                serde_json::json!({ "id": preamble_id }),
+            );
+        },
+        || {
+            // Judge retry — model lied about an action. Same bubble wipe,
+            // but kept as a separate event in case the frontend wants to
+            // surface different UI (e.g. a small "self-correcting" hint).
+            let _ = app_for_judge.emit(
                 "chat-retry",
-                serde_json::json!({ "id": retry_id }),
+                serde_json::json!({ "id": judge_id }),
             );
         },
     )
@@ -974,10 +1007,12 @@ async fn chat_send_stream(
             rusqlite::params![asst_msg_id, session_id, answer],
         )
         .map_err(|e| e.to_string())?;
-        let _ = conn.execute(
+        if let Err(e) = conn.execute(
             "UPDATE chat_sessions SET updated_at = datetime('now') WHERE id = ?1",
             [&session_id],
-        );
+        ) {
+            log::warn!("chat_send_stream: bump session timestamp failed: {}", e);
+        }
     }
 
     let result = ChatTurnResult {
@@ -1302,10 +1337,12 @@ fn dismiss_memory(id: String, db: tauri::State<'_, Arc<Database>>) -> Result<Str
     )
     .map_err(|e| e.to_string())?;
     // Also remove from embeddings so chat doesn't surface it
-    let _ = conn.execute(
+    if let Err(e) = conn.execute(
         "DELETE FROM embeddings WHERE entity_type = 'memory' AND entity_id = ?1",
         [&id],
-    );
+    ) {
+        log::warn!("dismiss_memory: embedding cleanup for {} failed: {}", id, e);
+    }
     Ok("Dismissed".to_string())
 }
 
@@ -1315,10 +1352,12 @@ fn delete_memory(id: String, db: tauri::State<'_, Arc<Database>>) -> Result<Stri
     let conn = db.conn();
     conn.execute("DELETE FROM memories WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;
-    let _ = conn.execute(
+    if let Err(e) = conn.execute(
         "DELETE FROM embeddings WHERE entity_type = 'memory' AND entity_id = ?1",
         [&id],
-    );
+    ) {
+        log::warn!("delete_memory: embedding cleanup for {} failed: {}", id, e);
+    }
     Ok("Deleted".to_string())
 }
 
@@ -1583,10 +1622,15 @@ pub fn run() {
     let db_path = db::db_path();
     let database = Arc::new(Database::open(&db_path).expect("failed to open database"));
 
-    // Clean up orphaned `in_progress` conversations — these can pile up if
-    // the app crashes mid-recording or if voice mode's cancelRecording
-    // failed silently. CASCADE drops their transcript_segments + memories
-    // + action_items so the stats stay honest.
+    // Clean up orphaned conversation rows from a previous session.
+    // - `in_progress`: the app crashed mid-recording, OR a cancelRecording
+    //   call failed silently. Drop them (CASCADE drops their segments).
+    // - `processing`: stop_recording flipped status but the LLM extraction
+    //   never completed (LLM offline, network drop, app killed mid-extract,
+    //   or — historically — FloatingBar's stop never invoked the pipeline).
+    //   We DON'T delete these — they have a valid transcript. Reset back
+    //   to `processing_pending` so the user can manually reprocess from
+    //   the Conversations page (the row stays visible with "Process now").
     {
         let conn = database.conn();
         match conn.execute(
@@ -1595,7 +1639,18 @@ pub fn run() {
         ) {
             Ok(n) if n > 0 => log::info!("Startup cleanup: removed {} orphaned in-progress conversation(s)", n),
             Ok(_) => {}
-            Err(e) => log::warn!("Startup cleanup failed: {}", e),
+            Err(e) => log::warn!("Startup cleanup (in_progress) failed: {}", e),
+        }
+        // Stuck-in-processing rows: leave the transcript intact, just flip
+        // status back to 'completed' (treated as "raw, not yet extracted").
+        // The user can click reprocess to re-run the LLM pipeline.
+        match conn.execute(
+            "UPDATE conversations SET status = 'completed' WHERE status = 'processing'",
+            [],
+        ) {
+            Ok(n) if n > 0 => log::info!("Startup cleanup: reset {} stuck-processing conversation(s) — user can reprocess", n),
+            Ok(_) => {}
+            Err(e) => log::warn!("Startup cleanup (processing) failed: {}", e),
         }
     }
 

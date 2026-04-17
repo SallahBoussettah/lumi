@@ -97,39 +97,40 @@ pub async fn process_conversation(
         Err(e) => log::error!("Action item extraction failed: {}", e),
     }
 
-    // Extract memories — and embed each one
-    let mut memory_records: Vec<(String, String)> = Vec::new();
-    match extract_memories(client, transcript).await {
+    // Extract memories — route each through the dedup pipeline (same path
+    // chat tool uses) so processor-extracted memories don't duplicate ones
+    // the user already created via chat, and vice versa. Embedding is done
+    // inside dedup_or_create_memory so we don't need a second pass here.
+    match extract_memories(client, db, transcript).await {
         Ok(memories) => {
-            let conn = db.conn();
+            let n = memories.len();
             for mem in &memories {
-                let id = uuid::Uuid::new_v4().to_string();
-                let _ = conn.execute(
-                    "INSERT INTO memories (id, content, category, conversation_id)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![id, mem.content, mem.category, conversation_id],
-                );
-                memory_records.push((id, mem.content.clone()));
+                if let Err(e) = super::tools::dedup_or_create_memory(
+                    &mem.content,
+                    &mem.category,
+                    Some(conversation_id),
+                    client,
+                    db,
+                    &embedder,
+                )
+                .await
+                {
+                    log::warn!("processor: dedup_or_create_memory failed: {}", e);
+                }
             }
-            log::info!("Extracted {} memories", memories.len());
+            log::info!("Extracted {} memories (after dedup)", n);
         }
         Err(e) => log::error!("Memory extraction failed: {}", e),
     }
 
-    // Generate embeddings for RAG search.
-    // Failures here are non-fatal — chat just won't have context for these items.
+    // Generate embedding for the conversation overview (separate from memories,
+    // which were embedded inside dedup_or_create_memory above).
     if let (Some(title), Some(overview)) = (conv_title_for_embed, conv_overview_for_embed) {
         let combined = format!("{}\n{}", title, overview);
         if let Err(e) =
             rag::store_embedding(&embedder, db, "conversation", conversation_id, &combined).await
         {
             log::warn!("Failed to embed conversation overview: {}", e);
-        }
-    }
-
-    for (mem_id, content) in &memory_records {
-        if let Err(e) = rag::store_embedding(&embedder, db, "memory", mem_id, content).await {
-            log::warn!("Failed to embed memory {}: {}", mem_id, e);
         }
     }
 
@@ -168,8 +169,41 @@ async fn extract_action_items(
     })
 }
 
-async fn extract_memories(client: &LlmClient, transcript: &str) -> Result<Vec<Memory>, String> {
-    let response = client.chat(prompts::MEMORIES_PROMPT, transcript).await?;
+async fn extract_memories(
+    client: &LlmClient,
+    db: &Arc<Database>,
+    transcript: &str,
+) -> Result<Vec<Memory>, String> {
+    // Inject the user's recent memories so the model can avoid recreating
+    // duplicates. Cap at ~50 to keep the prompt bounded.
+    let existing = {
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT category, content FROM memories
+                 WHERE is_dismissed = 0
+                 ORDER BY created_at DESC LIMIT 50",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        if rows.is_empty() {
+            "(none yet)".to_string()
+        } else {
+            rows.iter()
+                .map(|(cat, c)| format!("- [{}] {}", cat, c))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    };
+
+    let prompt = prompts::MEMORIES_PROMPT.replace("{existing_memories}", &existing);
+    let response = client.chat(&prompt, transcript).await?;
 
     let cleaned = clean_json(&response);
     serde_json::from_str::<Vec<Memory>>(&cleaned).map_err(|e| {

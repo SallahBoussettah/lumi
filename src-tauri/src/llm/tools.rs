@@ -1,5 +1,6 @@
-use super::client::{ToolDef, ToolFunction};
+use super::client::{LlmClient, ToolDef, ToolFunction};
 use super::embed::Embedder;
+use super::prompts;
 use super::rag;
 use crate::db::Database;
 use serde_json::{json, Value};
@@ -27,7 +28,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                         },
                         "due_at": {
                             "type": "string",
-                            "description": "Optional due date in ISO 8601 format (e.g. '2026-04-22T09:00:00Z'). Omit if no due date was specified."
+                            "description": "Optional due date as 'YYYY-MM-DD' (date-only) — copy the EXACT ISO value from the DATE LOOKUP table in the system prompt for the day the user mentioned. Do NOT compute the date yourself. Omit entirely if the user gave no deadline."
                         }
                     },
                     "required": ["description", "priority"]
@@ -92,13 +93,13 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             kind: "function".into(),
             function: ToolFunction {
                 name: "create_memory".into(),
-                description: "Save a fact or piece of knowledge for future reference. Use sparingly — only when the user explicitly asks you to remember something.".into(),
+                description: "Save a fact or piece of knowledge for future reference. Use only when the user explicitly asks you to remember something.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "content": {
                             "type": "string",
-                            "description": "The fact or memory, max 15 words, specific and concrete"
+                            "description": "The fact, ≤25 words, specific and concrete. PRESERVE the user's exact wording for proper nouns (names, places, project names) and for currency/unit terms (e.g. if they say 'dirhams' write 'dirhams', NOT 'AED' or 'MAD'; if they say 'bucks' write 'bucks', NOT 'USD'). Don't 'normalize' or 'translate' user vocabulary into codes or abbreviations."
                         },
                         "category": {
                             "type": "string",
@@ -176,6 +177,66 @@ pub fn tool_definitions() -> Vec<ToolDef> {
         ToolDef {
             kind: "function".into(),
             function: ToolFunction {
+                name: "search_memories".into(),
+                description: "Semantic search across the user's memories. Use when the auto-retrieved \
+                    context above doesn't contain what you need to answer — e.g. user asks about a \
+                    specific person, project, or topic and you want to find every related memory. \
+                    Returns the top matches with relevance scores.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Free-text query. Searches by meaning, not exact keywords."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results. Default 5, max 20."
+                        }
+                    },
+                    "required": ["query"]
+                }),
+            },
+        },
+        ToolDef {
+            kind: "function".into(),
+            function: ToolFunction {
+                name: "search_conversations".into(),
+                description: "Semantic search across captured conversations (titles + overviews). \
+                    Use when the user asks about past discussions, meetings, or what was said about \
+                    a topic. Returns top matches with snippets.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Free-text query."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results. Default 5, max 10."
+                        }
+                    },
+                    "required": ["query"]
+                }),
+            },
+        },
+        ToolDef {
+            kind: "function".into(),
+            function: ToolFunction {
+                name: "get_today_summary".into(),
+                description: "Returns a quick digest of today's activity: new conversations \
+                    captured, new memories extracted, pending and completed tasks. Use when the \
+                    user asks 'what happened today', 'what did I do', or wants a daily snapshot.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+        },
+        ToolDef {
+            kind: "function".into(),
+            function: ToolFunction {
                 name: "end_voice_session".into(),
                 description: "Closes the voice conversation overlay. Only call this when the USER \
                     explicitly signals they are done with the entire conversation, not just one \
@@ -208,6 +269,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
 pub async fn execute_tool(
     name: &str,
     arguments: &str,
+    llm: &LlmClient,
     db: &Arc<Database>,
     embedder: &Embedder,
 ) -> Result<String, String> {
@@ -219,10 +281,13 @@ pub async fn execute_tool(
         "complete_task" => complete_task(&args, db).await,
         "update_task" => update_task(&args, db).await,
         "list_tasks" => list_tasks(&args, db).await,
-        "create_memory" => create_memory(&args, db, embedder).await,
+        "create_memory" => create_memory(&args, llm, db, embedder).await,
         "update_memory" => update_memory_tool(&args, db, embedder).await,
         "delete_memory" => delete_memory_tool(&args, db).await,
         "list_memories" => list_memories_tool(&args, db).await,
+        "search_memories" => search_memories_tool(&args, db, embedder).await,
+        "search_conversations" => search_conversations_tool(&args, db, embedder).await,
+        "get_today_summary" => get_today_summary_tool(db).await,
         "end_voice_session" => {
             // Pure signal — the frontend reads the tool name out of the
             // turn result and closes voice mode after the farewell finishes.
@@ -589,8 +654,16 @@ async fn list_memories_tool(args: &Value, db: &Arc<Database>) -> Result<String, 
     Ok(out)
 }
 
+/// Serializes the create_memory critical section: search → LLM resolver →
+/// DB write. Without this lock, two parallel `create_memory` calls (e.g.
+/// from a tool-using chat turn and the post-conversation extractor running
+/// concurrently) would both miss the duplicate (TOCTOU window during the
+/// multi-second resolver call) and both insert.
+static CREATE_MEMORY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn create_memory(
     args: &Value,
+    llm: &LlmClient,
     db: &Arc<Database>,
     embedder: &Embedder,
 ) -> Result<String, String> {
@@ -603,15 +676,88 @@ async fn create_memory(
         .and_then(Value::as_str)
         .unwrap_or("system");
 
-    // Dedup: if a memory with similar content (>85% cosine) already exists, skip
-    let existing_hits = rag::search(embedder, db, content, 1).await.ok();
-    if let Some(hits) = existing_hits {
-        if let Some(top) = hits.first() {
-            if top.entity_type == "memory" && top.score > 0.85 {
+    dedup_or_create_memory(content, category, None, llm, db, embedder).await
+}
+
+/// Public entry point for "save a memory, with dedup". Used by both the
+/// `create_memory` chat tool and the post-conversation processor — so
+/// that both paths benefit from the LLM resolver and neither produces
+/// duplicates of the other's output.
+pub async fn dedup_or_create_memory(
+    content: &str,
+    category: &str,
+    conversation_id: Option<&str>,
+    llm: &LlmClient,
+    db: &Arc<Database>,
+    embedder: &Embedder,
+) -> Result<String, String> {
+    // Hold the dedup lock for the full search → resolver → write sequence.
+    let _guard = CREATE_MEMORY_LOCK.lock().await;
+
+    // Look for a near-duplicate. Threshold raised back to 0.70 — at 0.55
+    // nomic-embed-text was firing on weakly-related facts and the resolver
+    // (biased toward merge) produced Frankenstein memories. 0.70 is the
+    // empirical "topically overlapping" floor for nomic-embed-text on
+    // short factual sentences.
+    let top_hit = rag::search(embedder, db, content, 1)
+        .await
+        .ok()
+        .and_then(|hits| hits.into_iter().next())
+        .filter(|h| h.entity_type == "memory" && h.score > 0.70);
+
+    if let Some(hit) = top_hit {
+        // Fetch the existing row's category for context.
+        let existing_category: String = {
+            let conn = db.conn();
+            conn.query_row(
+                "SELECT category FROM memories WHERE id = ?1",
+                [&hit.entity_id],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| "system".to_string())
+        };
+
+        match resolve_memory_dedup(
+            llm,
+            &existing_category,
+            &hit.text,
+            category,
+            content,
+        )
+        .await
+        {
+            Ok(DedupAction::KeepExisting) => {
                 return Ok(format!(
                     "Already remembered: \"{}\" (no duplicate created)",
-                    top.text.trim()
+                    hit.text.trim()
                 ));
+            }
+            Ok(DedupAction::Merge(merged)) | Ok(DedupAction::Replace(merged)) => {
+                {
+                    let conn = db.conn();
+                    conn.execute(
+                        "UPDATE memories SET content = ?1, category = ?2,
+                         updated_at = datetime('now') WHERE id = ?3",
+                        rusqlite::params![merged, category, hit.entity_id],
+                    )
+                    .map_err(|e| format!("DB update failed: {}", e))?;
+                }
+                let _ = rag::store_embedding(
+                    embedder,
+                    db,
+                    "memory",
+                    &hit.entity_id,
+                    &merged,
+                )
+                .await;
+                return Ok(format!("Memory updated: \"{}\"", merged));
+            }
+            Ok(DedupAction::KeepBoth) => {
+                // Fall through to insert.
+            }
+            Err(e) => {
+                // Resolver failed — be conservative and just insert.
+                log::warn!("Memory dedup resolver failed: {} — inserting new memory", e);
             }
         }
     }
@@ -619,9 +765,13 @@ async fn create_memory(
     let id = uuid::Uuid::new_v4().to_string();
     {
         let conn = db.conn();
+        // `manually_added=1` for chat-tool insertions (no conversation_id),
+        // `manually_added=0` and conversation_id set for processor extractions.
+        let manually_added: i64 = if conversation_id.is_some() { 0 } else { 1 };
         conn.execute(
-            "INSERT INTO memories (id, content, category, manually_added) VALUES (?1, ?2, ?3, 1)",
-            rusqlite::params![id, content, category],
+            "INSERT INTO memories (id, content, category, conversation_id, manually_added)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, content, category, conversation_id, manually_added],
         )
         .map_err(|e| format!("DB insert failed: {}", e))?;
     }
@@ -629,6 +779,64 @@ async fn create_memory(
     let _ = rag::store_embedding(embedder, db, "memory", &id, content).await;
 
     Ok(format!("Memory saved: \"{}\"", content))
+}
+
+enum DedupAction {
+    KeepExisting,
+    Merge(String),
+    Replace(String),
+    KeepBoth,
+}
+
+async fn resolve_memory_dedup(
+    llm: &LlmClient,
+    existing_category: &str,
+    existing_text: &str,
+    new_category: &str,
+    new_text: &str,
+) -> Result<DedupAction, String> {
+    let prompt = prompts::MEMORY_DEDUP_PROMPT
+        .replace("{existing_category}", existing_category)
+        .replace("{existing_text}", existing_text)
+        .replace("{new_category}", new_category)
+        .replace("{new_text}", new_text);
+    let raw = llm
+        .chat(
+            "You are a memory deduplication judge. Reply with ONLY a JSON object.",
+            &prompt,
+        )
+        .await?;
+
+    let cleaned = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let v: Value = serde_json::from_str(cleaned)
+        .map_err(|e| format!("Resolver returned non-JSON: {} — raw: {}", e, raw))?;
+    let action = v
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("Resolver missing action — raw: {}", raw))?;
+    let merged = v
+        .get("merged_content")
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string());
+
+    match action {
+        "keep_existing" => Ok(DedupAction::KeepExisting),
+        "merge" => merged
+            .filter(|s| !s.is_empty())
+            .map(DedupAction::Merge)
+            .ok_or_else(|| "merge action requires merged_content".to_string()),
+        "replace" => merged
+            .filter(|s| !s.is_empty())
+            .map(DedupAction::Replace)
+            .ok_or_else(|| "replace action requires merged_content".to_string()),
+        "keep_both" => Ok(DedupAction::KeepBoth),
+        other => Err(format!("unknown action: {}", other)),
+    }
 }
 
 // ============================================================
@@ -717,4 +925,162 @@ async fn find_memory(
     }
 
     Ok(None)
+}
+
+// ============================================================
+// Agentic search tools — let the LLM fetch context on demand
+// ============================================================
+
+async fn search_memories_tool(
+    args: &Value,
+    db: &Arc<Database>,
+    embedder: &Embedder,
+) -> Result<String, String> {
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or("Missing 'query'")?;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_i64)
+        .map(|n| n.clamp(1, 20) as usize)
+        .unwrap_or(5);
+
+    let hits = rag::search(embedder, db, query, limit * 2)
+        .await
+        .map_err(|e| format!("Search failed: {}", e))?;
+    let memory_hits: Vec<_> = hits
+        .into_iter()
+        .filter(|h| h.entity_type == "memory")
+        .take(limit)
+        .collect();
+
+    if memory_hits.is_empty() {
+        return Ok(format!(
+            "No memories found matching '{}'. The user hasn't recorded anything related yet.",
+            query
+        ));
+    }
+
+    let lines: Vec<String> = memory_hits
+        .iter()
+        .map(|h| format!("- ({:.0}%) {}", h.score * 100.0, h.text.trim()))
+        .collect();
+    Ok(format!(
+        "Top {} memory match(es) for '{}':\n{}",
+        memory_hits.len(),
+        query,
+        lines.join("\n")
+    ))
+}
+
+async fn search_conversations_tool(
+    args: &Value,
+    db: &Arc<Database>,
+    embedder: &Embedder,
+) -> Result<String, String> {
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or("Missing 'query'")?;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_i64)
+        .map(|n| n.clamp(1, 10) as usize)
+        .unwrap_or(5);
+
+    let hits = rag::search(embedder, db, query, limit * 2)
+        .await
+        .map_err(|e| format!("Search failed: {}", e))?;
+    let conv_hits: Vec<_> = hits
+        .into_iter()
+        .filter(|h| h.entity_type == "conversation")
+        .take(limit)
+        .collect();
+
+    if conv_hits.is_empty() {
+        return Ok(format!(
+            "No past conversations found matching '{}'.",
+            query
+        ));
+    }
+
+    let lines: Vec<String> = conv_hits
+        .iter()
+        .map(|h| format!("- ({:.0}%) {}", h.score * 100.0, h.text.trim()))
+        .collect();
+    Ok(format!(
+        "Top {} conversation match(es) for '{}':\n{}",
+        conv_hits.len(),
+        query,
+        lines.join("\n")
+    ))
+}
+
+async fn get_today_summary_tool(db: &Arc<Database>) -> Result<String, String> {
+    let conn = db.conn();
+
+    let conversations: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM conversations
+             WHERE discarded = 0 AND date(started_at) = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let memories_today: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM memories
+             WHERE is_dismissed = 0 AND date(created_at) = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let pending_tasks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM action_items WHERE completed = 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let completed_today: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM action_items
+             WHERE completed = 1 AND date(updated_at) = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    // Pull the actual descriptions of pending tasks (capped) so the model
+    // can mention specifics if asked.
+    let pending_list: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT description FROM action_items
+                 WHERE completed = 0 ORDER BY created_at DESC LIMIT 5",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+
+    let mut out = format!(
+        "Today's snapshot:\n- {} new conversation(s) captured\n- {} new memory(ies) saved\n- {} task(s) completed today\n- {} pending task(s) total",
+        conversations, memories_today, completed_today, pending_tasks
+    );
+    if !pending_list.is_empty() {
+        out.push_str("\n\nPending tasks:");
+        for d in &pending_list {
+            out.push_str(&format!("\n- {}", d));
+        }
+    }
+    Ok(out)
 }

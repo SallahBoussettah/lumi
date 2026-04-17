@@ -24,7 +24,11 @@ struct ChatRequest {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChatMessage {
     pub role: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    /// Always serialized, even when empty. Some OpenAI-compatible servers
+    /// (Ollama with qwen included) return 400 "invalid message content type:
+    /// <nil>" if an assistant-with-tool_calls message omits the content field
+    /// entirely. Sending an empty string is the safe default.
+    #[serde(default)]
     pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
@@ -146,13 +150,31 @@ impl LlmClient {
         log::info!("LLM model switched to: {}", model);
     }
 
-    /// Simple system+user one-shot chat (no tools).
+    /// Simple system+user one-shot chat (no tools), default temperature.
     pub async fn chat(&self, system_prompt: &str, user_prompt: &str) -> Result<String, String> {
         let messages = vec![
             ChatMessage::system(system_prompt),
             ChatMessage::user(user_prompt),
         ];
         self.chat_messages(&messages).await
+    }
+
+    /// Like `chat` but with an explicit temperature. The verification judge
+    /// uses `temperature=0` for deterministic YES/NO answers.
+    pub async fn chat_at_temp(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        temperature: f32,
+    ) -> Result<String, String> {
+        let messages = vec![
+            ChatMessage::system(system_prompt),
+            ChatMessage::user(user_prompt),
+        ];
+        let msg = self
+            .chat_messages_with_tools_at_temp(&messages, None, temperature)
+            .await?;
+        Ok(msg.content)
     }
 
     /// Send messages and return the response text (no tool calls).
@@ -168,12 +190,23 @@ impl LlmClient {
         messages: &[ChatMessage],
         tools: Option<&[ToolDef]>,
     ) -> Result<ChatMessage, String> {
+        self.chat_messages_with_tools_at_temp(messages, tools, 0.3)
+            .await
+    }
+
+    /// Underlying chat completion call with explicit temperature.
+    pub async fn chat_messages_with_tools_at_temp(
+        &self,
+        messages: &[ChatMessage],
+        tools: Option<&[ToolDef]>,
+        temperature: f32,
+    ) -> Result<ChatMessage, String> {
         let url = format!("{}/v1/chat/completions", self.base_url);
 
         let request = ChatRequest {
             model: self.model(),
             messages: messages.to_vec(),
-            temperature: 0.3,
+            temperature,
             stream: false,
             tools: tools.map(|t| t.to_vec()),
         };

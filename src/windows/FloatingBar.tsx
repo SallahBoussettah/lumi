@@ -5,7 +5,6 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import {
   startRecording,
-  stopRecording,
   cancelRecording,
   isRecording as checkRecording,
   transcribePending,
@@ -260,8 +259,12 @@ export function FloatingBar() {
   }
 
   async function handleStopTalking() {
+    // Floating bar's mic is chat input, NOT a "capture this conversation"
+    // recording. Use cancelRecording so the conversation row is dropped
+    // (otherwise it sits at status='processing' forever — there's no
+    // extraction pipeline driver for FB-initiated rows).
     try {
-      const convId = await stopRecording();
+      await cancelRecording();
       setRecording(false);
       if (liveText.trim()) {
         const text = liveText.trim();
@@ -272,7 +275,6 @@ export function FloatingBar() {
       } else {
         setMode("expanded");
       }
-      void convId;
     } catch (e) {
       console.error("Stop failed:", e);
       setRecording(false);
