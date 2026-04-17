@@ -45,7 +45,7 @@ Extract memories as a JSON array. Each item:
 Categories:
 - "system": Facts about the user — preferences, habits, relationships, work details
   Example: "Prefers dark mode for all applications"
-  Example: "Works on a project called Omniscient"
+  Example: "Works on a project called Lumi"
 - "interesting": External knowledge, recommendations, insights with attribution
   Example: "Marcus recommended the book The Overstory"
   Example: "PipeWire replaced PulseAudio on modern Linux"

@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Omniscient",
+  "productName": "Lumi",
   "version": "0.1.0",
-  "identifier": "dev.omniscient.desktop",
+  "identifier": "dev.lumi.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Omniscient",
+        "title": "Lumi",
         "width": 1100,
         "height": 720,
         "minWidth": 800,
@@ -25,7 +25,7 @@
       {
         "label": "floating",
         "url": "index.html?window=floating",
-        "title": "Omniscient — Quick Bar",
+        "title": "Lumi — Quick Bar",
         "width": 320,
         "height": 56,
         "minWidth": 60,
@@ -48,7 +48,7 @@
     "trayIcon": {
       "id": "main",
       "iconPath": "icons/128x128.png",
-      "tooltip": "Omniscient — left-click to toggle floating bar",
+      "tooltip": "Lumi — left-click to toggle floating bar",
       "iconAsTemplate": false,
       "menuOnLeftClick": false
     }

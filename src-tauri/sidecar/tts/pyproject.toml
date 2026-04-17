@@ -1,7 +1,7 @@
 [project]
-name = "omniscient-tts"
+name = "lumi-tts"
 version = "0.1.0"
-description = "Kokoro TTS sidecar for Omniscient (PyTorch backend with real word timings)"
+description = "Kokoro TTS sidecar for Lumi (PyTorch backend with real word timings)"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "kokoro>=0.9",

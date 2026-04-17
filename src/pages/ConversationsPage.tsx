@@ -214,7 +214,7 @@ export function ConversationsPage({ onOpenConversation }: Props) {
           console.error("Failed to process conversation:", e);
           await notifyIfBackground(
             "Processing failed",
-            "Couldn't process your conversation. Open Omniscient to retry."
+            "Couldn't process your conversation. Open Lumi to retry."
           );
         }
         setProcessing(false);
@@ -284,7 +284,7 @@ export function ConversationsPage({ onOpenConversation }: Props) {
 
   function log(...args: unknown[]) {
     // eslint-disable-next-line no-console
-    console.log("[Omniscient]", ...args);
+    console.log("[Lumi]", ...args);
   }
 
   // Fire a desktop notification ONLY if the main window isn't focused.

@@ -33,7 +33,7 @@ const EXPANDED_WITH_HISTORY_H = 260;
 const ANSWER_H = 320;
 const RECORDING_H = 200;
 
-const POSITION_KEY = "omniscient.floatingBar.position";
+const POSITION_KEY = "lumi.floatingBar.position";
 
 type Mode = "compact" | "expanded" | "recording" | "answer";
 
@@ -496,7 +496,7 @@ export function FloatingBar() {
                 ? "thinking…"
                 : sessionId
                   ? "Follow up…"
-                  : "Ask Omniscient…"
+                  : "Ask Lumi…"
             }
             rows={1}
             disabled={thinking}

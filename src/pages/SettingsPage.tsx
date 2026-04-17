@@ -114,7 +114,7 @@ export function SettingsPage() {
   async function handleExport(format: "json" | "md") {
     setExportStatus(null);
     const today = new Date().toISOString().slice(0, 10);
-    const defaultName = `omniscient-export-${today}.${format}`;
+    const defaultName = `lumi-export-${today}.${format}`;
     try {
       const path = await save({
         defaultPath: defaultName,

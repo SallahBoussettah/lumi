@@ -1,8 +1,8 @@
-# Omniscient
+# Lumi
 
 > An always-on AI assistant for Linux that listens to your conversations, captures your memories, and helps you stay on top of what matters — all running locally on your machine.
 
-Omniscient is a desktop companion that records and transcribes what you say, extracts the meaningful bits (memories, action items, key topics), and lets you ask natural-language questions about anything you've captured. Everything runs offline on your own GPU. Your data never leaves your machine.
+Lumi is a desktop companion that records and transcribes what you say, extracts the meaningful bits (memories, action items, key topics), and lets you ask natural-language questions about anything you've captured. Everything runs offline on your own GPU. Your data never leaves your machine.
 
 ## What it does
 
@@ -64,8 +64,8 @@ Designed for Linux with AMD GPUs (tested on RDNA 4 / RX 9070 XT). Should work on
 
 ```bash
 # 1. Clone
-git clone git@github.com:SallahBoussettah/omniscient.git
-cd omniscient
+git clone git@github.com:SallahBoussettah/lumi.git
+cd lumi
 
 # 2. Install JS dependencies
 pnpm install
@@ -92,7 +92,7 @@ The first time you click the mic button, the Whisper model (Large-v3-Turbo, ~1.5
 
 ## Configuration
 
-Settings are stored in SQLite under `~/.local/share/omniscient/omniscient.db`.
+Settings are stored in SQLite under `~/.local/share/lumi/lumi.db`.
 
 The Settings page lets you:
 - Switch between installed Ollama chat models (selection persists)
@@ -103,8 +103,8 @@ The Settings page lets you:
 
 ## Data location
 
-Everything lives in `~/.local/share/omniscient/`:
-- `omniscient.db` — conversations, memories, tasks, chat sessions, embeddings
+Everything lives in `~/.local/share/lumi/`:
+- `lumi.db` — conversations, memories, tasks, chat sessions, embeddings
 - `models/` — downloaded Whisper model files
 
 Nothing is ever sent to a remote server unless you explicitly configure a remote LLM provider (currently only local Ollama is wired up).

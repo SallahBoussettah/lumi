@@ -69,7 +69,7 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
     <nav className="sidebar">
       <div className="sidebar-brand">
         <div className="sidebar-brand-mark">O</div>
-        <span className="sidebar-brand-name">Omniscient</span>
+        <span className="sidebar-brand-name">Lumi</span>
       </div>
 
       <div className="sidebar-section">

@@ -1626,7 +1626,7 @@ pub fn run() {
             let open_main =
                 MenuItem::with_id(app, "open_main", "Open Main Window", true, None::<&str>)?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit Omniscient", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Lumi", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&toggle_bar, &open_main, &separator, &quit])?;
 
             if let Some(tray) = app.tray_by_id("main") {

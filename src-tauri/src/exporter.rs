@@ -215,7 +215,7 @@ pub fn build_bundle(db: &Arc<Database>) -> Result<ExportBundle, String> {
 
 pub fn render_markdown(b: &ExportBundle) -> String {
     let mut s = String::new();
-    s.push_str(&format!("# Omniscient Export\n\nExported at {}\n\n", b.exported_at));
+    s.push_str(&format!("# Lumi Export\n\nExported at {}\n\n", b.exported_at));
 
     s.push_str(&format!("## Conversations ({})\n\n", b.conversations.len()));
     for c in &b.conversations {
@@ -261,7 +261,7 @@ pub fn render_markdown(b: &ExportBundle) -> String {
     for sess in &b.chat_sessions {
         s.push_str(&format!("### {}\n\n", sess.title.as_deref().unwrap_or("Untitled chat")));
         for m in &sess.messages {
-            let who = if m.sender == "user" { "**You**" } else { "**Omniscient**" };
+            let who = if m.sender == "user" { "**You**" } else { "**Lumi**" };
             s.push_str(&format!("{}: {}\n\n", who, m.text));
         }
         s.push_str("---\n\n");

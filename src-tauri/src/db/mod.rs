@@ -33,11 +33,11 @@ impl Database {
 }
 
 pub fn data_dir() -> PathBuf {
-    let dirs = directories::ProjectDirs::from("dev", "omniscient", "Omniscient")
+    let dirs = directories::ProjectDirs::from("dev", "lumi", "Lumi")
         .expect("failed to resolve data directory");
     dirs.data_dir().to_path_buf()
 }
 
 pub fn db_path() -> PathBuf {
-    data_dir().join("omniscient.db")
+    data_dir().join("lumi.db")
 }

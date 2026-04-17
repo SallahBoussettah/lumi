@@ -1,5 +1,5 @@
 """
-Omniscient TTS sidecar — Kokoro-82M served over HTTP.
+Lumi TTS sidecar — Kokoro-82M served over HTTP.
 
 Uses the official `kokoro` PyTorch package, which exposes real per-word
 timestamps via the model's `pred_dur` output (aligned to misaki word tokens).

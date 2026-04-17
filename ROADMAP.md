@@ -1,4 +1,4 @@
-# Omniscient — Phased Build Roadmap
+# Lumi — Phased Build Roadmap
 
 An always-on AI assistant for Linux that sees your screen, hears your conversations, extracts memories and tasks, and keeps you focused. Built with Tauri + React + Rust.
 
